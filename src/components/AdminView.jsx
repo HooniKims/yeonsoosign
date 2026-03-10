@@ -1,5 +1,18 @@
-import { useMemo, useRef, useState } from "react";
-import { downloadStaffTemplate, parseStaffFile } from "../lib/staff";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { buildStaffTemplateBlob, parseStaffFile, STAFF_TEMPLATE_FILE_NAME } from "../lib/staff";
+import { saveAs } from "file-saver";
+import { Building, Building2, Calendar, PenLine } from "lucide-react";
+
+function buildSessionDraft(session) {
+  return {
+    title: session.title || "",
+    schoolName: session.schoolName || "",
+    date: session.date || "",
+    time: session.time || "",
+    useAuth: Boolean(session.authCode),
+    authCode: session.authCode || "",
+  };
+}
 
 function SessionBadge({ type }) {
   return (
@@ -10,41 +23,184 @@ function SessionBadge({ type }) {
 }
 
 function SessionCard({
+  busy,
+  notify,
   session,
   onDeleteSession,
   onOpenReport,
   onOpenShare,
+  onUpdateSession,
   onUpdateStaff,
 }) {
-  return (
-    <article className="session-card">
-      <div className="session-card-copy">
-        <h3>
-          <SessionBadge type={session.type} />
-          {session.title}
-        </h3>
-        <p>
-          📅 {session.date} | 🏫 {session.schoolName} |{" "}
-          <strong>✍️ {(session.signatures || []).length}명 서명</strong>
-        </p>
-      </div>
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(() => buildSessionDraft(session));
 
-      <div className="session-card-actions">
-        <button className="mini-button" onClick={() => onOpenShare(session)}>
-          링크 공유
-        </button>
-        {session.type === "school" ? (
-          <button className="mini-button mini-button-indigo" onClick={() => onUpdateStaff(session.id)}>
-            명단 업데이트
-          </button>
-        ) : null}
-        <button className="mini-button mini-button-blue" onClick={() => onOpenReport(session.id)}>
-          결과 출력
-        </button>
-        <button className="mini-button mini-button-danger" onClick={() => onDeleteSession(session.id)}>
-          삭제
-        </button>
-      </div>
+  useEffect(() => {
+    setDraft(buildSessionDraft(session));
+    setIsEditing(false);
+  }, [session.authCode, session.date, session.id, session.schoolName, session.time, session.title]);
+
+  function updateDraft(field, value) {
+    setDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  function handleCancelEdit() {
+    setDraft(buildSessionDraft(session));
+    setIsEditing(false);
+  }
+
+  async function handleSave(event) {
+    event.preventDefault();
+
+    if (!draft.title.trim() || !draft.schoolName.trim() || !draft.date.trim()) {
+      notify("연수명, 기관명, 날짜를 모두 입력해주세요.", "error");
+      return;
+    }
+
+    if (draft.useAuth && !draft.authCode.trim()) {
+      notify("인증 비밀번호를 입력해주세요.", "error");
+      return;
+    }
+
+    const success = await onUpdateSession(session.id, {
+      authCode: draft.useAuth ? draft.authCode.trim() : "",
+      date: draft.date,
+      schoolName: draft.schoolName.trim(),
+      time: draft.time.trim(),
+      title: draft.title.trim(),
+    });
+
+    if (success) {
+      setIsEditing(false);
+    }
+  }
+
+  return (
+    <article className={`session-card ${isEditing ? "session-card-editing" : ""}`}>
+      {isEditing ? (
+        <form className="session-edit-form form-stack" onSubmit={handleSave}>
+          <div className="session-card-copy">
+            <h3>
+              <SessionBadge type={session.type} />
+              연수 정보 수정
+            </h3>
+            <p className="session-card-meta">
+              <span className="session-card-meta-item">
+                <Calendar size={14} /> 기존 일정 {session.date}
+              </span>
+              <span className="session-card-divider">|</span>
+              <span className="session-card-meta-item">
+                <Building size={14} /> 기존 기관 {session.schoolName}
+              </span>
+            </p>
+          </div>
+
+          <div className="form-grid session-edit-grid">
+            <input
+              className="text-input"
+              placeholder="연수명"
+              value={draft.title}
+              onChange={(event) => updateDraft("title", event.target.value)}
+            />
+            <input
+              className="text-input"
+              placeholder="기관명"
+              value={draft.schoolName}
+              onChange={(event) => updateDraft("schoolName", event.target.value)}
+            />
+            <input
+              className="text-input"
+              type="date"
+              value={draft.date}
+              onChange={(event) => updateDraft("date", event.target.value)}
+            />
+            <input
+              className="text-input"
+              placeholder="시간 (예: 15:00~17:00)"
+              value={draft.time}
+              onChange={(event) => updateDraft("time", event.target.value)}
+            />
+          </div>
+
+          <label className="inline-check">
+            <input
+              checked={draft.useAuth}
+              onChange={(event) => updateDraft("useAuth", event.target.checked)}
+              type="checkbox"
+            />
+            인증 비밀번호 설정
+          </label>
+
+          {draft.useAuth ? (
+            <input
+              className="text-input"
+              placeholder="비밀번호"
+              value={draft.authCode}
+              onChange={(event) => updateDraft("authCode", event.target.value)}
+            />
+          ) : null}
+
+          <div className="session-edit-actions">
+            <button className="ghost-button" disabled={busy} onClick={handleCancelEdit} type="button">
+              취소
+            </button>
+            <button className="mini-button mini-button-blue" disabled={busy} type="submit">
+              수정 저장
+            </button>
+          </div>
+        </form>
+      ) : (
+        <>
+          <div className="session-card-copy">
+            <h3>
+              <SessionBadge type={session.type} />
+              {session.title}
+            </h3>
+            <p className="session-card-meta">
+              <span className="session-card-meta-item">
+                <Calendar size={14} /> {session.date}
+              </span>
+              {session.time ? (
+                <>
+                  <span className="session-card-divider">|</span>
+                  <span className="session-card-meta-item">{session.time}</span>
+                </>
+              ) : null}
+              <span className="session-card-divider">|</span>
+              <span className="session-card-meta-item">
+                <Building size={14} /> {session.schoolName}
+              </span>
+              <span className="session-card-divider">|</span>
+              <strong className="session-card-meta-item session-card-meta-strong">
+                <PenLine size={14} /> {(session.staffList || []).length}명 중 {(session.signatures || []).length}명 서명
+              </strong>
+            </p>
+          </div>
+
+          <div className="session-card-actions">
+            <button className="mini-button mini-button-blue" disabled={busy} onClick={() => setIsEditing(true)}>
+              정보 수정
+            </button>
+            <button className="mini-button" disabled={busy} onClick={() => onOpenShare(session)}>
+              링크 공유
+            </button>
+            {session.type === "school" ? (
+              <button className="mini-button mini-button-indigo" disabled={busy} onClick={() => onUpdateStaff(session.id)}>
+                명단 업데이트
+              </button>
+            ) : null}
+            <button className="mini-button mini-button-blue" disabled={busy} onClick={() => onOpenReport(session.id)}>
+              결과 출력
+            </button>
+            <button className="mini-button mini-button-danger" disabled={busy} onClick={() => onDeleteSession(session.id)}>
+              삭제
+            </button>
+          </div>
+        </>
+      )}
     </article>
   );
 }
@@ -63,6 +219,7 @@ export default function AdminView({
   onOpenShare,
   onRefresh,
   onReplaceSessionStaffList,
+  onUpdateSession,
   onUpdateDefaultStaffList,
   sessions,
   staffList,
@@ -186,7 +343,17 @@ export default function AdminView({
                 <button className="mini-button mini-button-danger" onClick={onClearDefaultStaffList}>
                   명단 초기화
                 </button>
-                <button className="mini-button mini-button-success" onClick={downloadStaffTemplate}>
+                <button
+                  className="mini-button mini-button-success"
+                  onClick={async () => {
+                    try {
+                      const blob = await buildStaffTemplateBlob();
+                      saveAs(blob, STAFF_TEMPLATE_FILE_NAME);
+                    } catch (error) {
+                      notify("양식 다운로드에 실패했습니다.", "error");
+                    }
+                  }}
+                >
                   양식 다운로드
                 </button>
                 <button className="mini-button" onClick={() => baseUploadRef.current?.click()}>
@@ -232,7 +399,7 @@ export default function AdminView({
                   onChange={() => updateField("type", "school")}
                   type="radio"
                 />
-                🏫 학교용
+                <Building size={18} style={{ marginRight: "6px" }} /> 학교용
               </label>
               <label className={`toggle-card ${form.type === "office" ? "is-active" : ""}`}>
                 <input
@@ -240,7 +407,7 @@ export default function AdminView({
                   onChange={() => updateField("type", "office")}
                   type="radio"
                 />
-                🏢 외부공개
+                <Building2 size={18} style={{ marginRight: "6px" }} /> 외부공개
               </label>
             </div>
 
@@ -309,10 +476,13 @@ export default function AdminView({
             {sessions.length ? (
               sessions.map((session) => (
                 <SessionCard
+                  busy={busy}
                   key={session.id}
+                  notify={notify}
                   onDeleteSession={onDeleteSession}
                   onOpenReport={onOpenReport}
                   onOpenShare={onOpenShare}
+                  onUpdateSession={onUpdateSession}
                   onUpdateStaff={(sessionId) => {
                     updateTargetIdRef.current = sessionId;
                     updateUploadRef.current?.click();

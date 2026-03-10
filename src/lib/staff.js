@@ -1,8 +1,9 @@
+import { saveAs } from "file-saver";
 import { createId } from "./storage";
 
-const DEFAULT_DEPARTMENT = "\uAD50\uC9C1\uC6D0";
-const TEMPLATE_SHEET_NAME = "\uC591\uC2DD";
-const TEMPLATE_FILE_NAME = "\uBA85\uB2E8\uC591\uC2DD.xlsx";
+const DEFAULT_DEPARTMENT = "교직원";
+const TEMPLATE_SHEET_NAME = "양식";
+const TEMPLATE_FILE_NAME = "명단양식.xlsx";
 
 const NAME_HEADER_LABELS = [
   "name",
@@ -189,23 +190,30 @@ export async function parseStaffFile(file) {
   return parseDelimitedText(await file.text());
 }
 
-export function downloadStaffTemplate() {
-  return loadXlsx().then((XLSX) => {
-    const sheet = XLSX.utils.json_to_sheet(
-      [
-        {
-          "\uC9C1\uC704": "\uAD50\uC0AC",
-          "\uC131\uBA85": "\uD64D\uAE38\uB3D9",
-        },
-        {
-          "\uC9C1\uC704": "\uD589\uC815\uC2E4",
-          "\uC131\uBA85": "\uAE40\uC5F0\uC218",
-        },
-      ],
-      { header: ["\uC9C1\uC704", "\uC131\uBA85"] },
-    );
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, sheet, TEMPLATE_SHEET_NAME);
-    XLSX.writeFile(workbook, TEMPLATE_FILE_NAME);
-  });
+export async function buildStaffTemplateBlob() {
+  const XLSX = await loadXlsx();
+  const sheet = XLSX.utils.json_to_sheet(
+    [
+      {
+        "직위": "교사",
+        "성명": "홍길동",
+      },
+      {
+        "직위": "행정실",
+        "성명": "김연수",
+      },
+    ],
+    { header: ["직위", "성명"] },
+  );
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, TEMPLATE_SHEET_NAME);
+  const arrayBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  return new Blob([arrayBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 }
+
+export async function downloadStaffTemplate() {
+  const blob = await buildStaffTemplateBlob();
+  saveAs(blob, TEMPLATE_FILE_NAME);
+}
+
+export { TEMPLATE_FILE_NAME as STAFF_TEMPLATE_FILE_NAME };

@@ -14,6 +14,10 @@ const REQUEST_FAILED_MESSAGE =
   "\uC694\uCCAD \uCC98\uB9AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.";
 const INVALID_SESSION_DATA_MESSAGE =
   "\uC5F0\uB3D9\uC740 \uC131\uACF5\uD588\uC9C0\uB9CC \uC138\uC158 \uB370\uC774\uD130 \uD615\uC2DD\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.";
+const CLOUD_WRITE_VERIFY_FAILED_MESSAGE =
+  "\uC800\uC7A5 \uC694\uCCAD\uC744 \uBCF4\uB0C8\uC9C0\uB9CC \uC11C\uBC84 \uBC18\uC601\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. Apps Script \uBC30\uD3EC \uC0C1\uD0DC\uB97C \uB2E4\uC2DC \uD655\uC778\uD574 \uC8FC\uC138\uC694.";
+const CLOUD_WRITE_VERIFY_ATTEMPTS = 4;
+const CLOUD_WRITE_VERIFY_DELAY_MS = 300;
 
 export function validateScriptUrl(scriptUrl) {
   const trimmed = String(scriptUrl || "").trim();
@@ -63,16 +67,43 @@ async function readResponse(response) {
   return payload;
 }
 
-async function postAction(scriptUrl, body) {
-  const response = await fetch(validateScriptUrl(scriptUrl), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
   });
+}
 
-  return readResponse(response);
+function isSameValue(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+async function postAction(scriptUrl, body) {
+  try {
+    await fetch(validateScriptUrl(scriptUrl), {
+      method: "POST",
+      mode: "no-cors",
+      // Apps Script write responses do not expose CORS headers reliably, so verify the result with a follow-up GET.
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error(REQUEST_FAILED_MESSAGE);
+  }
+}
+
+async function verifyCloudWrite(config, predicate) {
+  for (let attempt = 0; attempt < CLOUD_WRITE_VERIFY_ATTEMPTS; attempt += 1) {
+    const sessions = await listSessions(config);
+
+    if (predicate(sessions)) {
+      return sessions;
+    }
+
+    if (attempt < CLOUD_WRITE_VERIFY_ATTEMPTS - 1) {
+      await wait(CLOUD_WRITE_VERIFY_DELAY_MS);
+    }
+  }
+
+  throw new Error(CLOUD_WRITE_VERIFY_FAILED_MESSAGE);
 }
 
 function isCloudEnabled(config) {
@@ -106,7 +137,15 @@ export async function upsertSession(config, session) {
     action: "createSession",
     session,
   });
-  return null;
+
+  return verifyCloudWrite(
+    config,
+    (sessions) =>
+      isSameValue(
+        sessions.find((item) => item.id === session.id) || null,
+        session,
+      ),
+  );
 }
 
 export async function deleteSession(config, sessionId) {
@@ -120,7 +159,8 @@ export async function deleteSession(config, sessionId) {
     action: "deleteSession",
     sessionId,
   });
-  return null;
+
+  return verifyCloudWrite(config, (sessions) => !sessions.some((item) => item.id === sessionId));
 }
 
 export async function addSignatureBatch(config, sessionIds, signature) {
@@ -152,7 +192,18 @@ export async function addSignatureBatch(config, sessionIds, signature) {
     sessionIds,
     signature,
   });
-  return null;
+
+  return verifyCloudWrite(config, (sessions) =>
+    sessionIds.every((sessionId) => {
+      const session = sessions.find((item) => item.id === sessionId);
+
+      if (!session) {
+        return false;
+      }
+
+      return (session.signatures || []).some((item) => isSameValue(item, signature));
+    }),
+  );
 }
 
 export async function removeSignatureBatch(config, sessionIds, staffId) {
@@ -178,7 +229,18 @@ export async function removeSignatureBatch(config, sessionIds, staffId) {
     sessionIds,
     staffId,
   });
-  return null;
+
+  return verifyCloudWrite(config, (sessions) =>
+    sessionIds.every((sessionId) => {
+      const session = sessions.find((item) => item.id === sessionId);
+
+      if (!session) {
+        return false;
+      }
+
+      return !(session.signatures || []).some((item) => item.staffId === staffId);
+    }),
+  );
 }
 
 export async function testScriptUrl(scriptUrl) {

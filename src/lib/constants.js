@@ -1,4 +1,5 @@
 export const APP_NAME = "온라인 연수연명부";
+export const PRINT_TITLE = "연수 연명부";
 export const APP_DESCRIPTION = "연수 생성, 참여 서명, 출력까지 한 곳에서 관리하세요.";
 export const APP_VERSION = "v0.9";
 
@@ -20,8 +21,6 @@ export const SESSION_TYPES = {
 export const PAGE_SIZE_OPTIONS = [26, 28, 30, 32, 34, 36, 38, 40];
 
 export const DEFAULT_POSITION_ORDER = [
-  "원장",
-  "원감",
   "교장",
   "교감",
   "부장교사",
@@ -47,10 +46,24 @@ function doGet(e) {
 }
 
 function doPost(e) {
-  const payload = e && e.postData && e.postData.contents
-    ? JSON.parse(e.postData.contents)
-    : {};
+  const payload = parsePostPayload_(e);
   return handleAction(payload.action, payload);
+}
+
+function parsePostPayload_(e) {
+  const raw = e && e.postData && e.postData.contents
+    ? String(e.postData.contents).trim()
+    : "";
+
+  if (raw) {
+    return JSON.parse(raw);
+  }
+
+  if (e && e.parameter && e.parameter.payload) {
+    return JSON.parse(e.parameter.payload);
+  }
+
+  return {};
 }
 
 function handleAction(action, payload) {

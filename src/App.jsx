@@ -28,10 +28,46 @@ import {
   writeStaffList,
 } from "./lib/storage";
 
+const HISTORY_MARKER = "yeonsoo-sign-route";
+const VALID_VIEWS = new Set(["landing", "admin", "cloud_setup", "signer", "report"]);
+
+function createRouteState({
+  index = 0,
+  view = "landing",
+  activeSessionId = null,
+  reportSessionId = null,
+  directEntry = false,
+}) {
+  const safeView = VALID_VIEWS.has(view) ? view : "landing";
+
+  return {
+    marker: HISTORY_MARKER,
+    index: Number.isFinite(index) ? index : 0,
+    view: safeView,
+    activeSessionId: safeView === "signer" ? activeSessionId || null : null,
+    reportSessionId: safeView === "report" ? reportSessionId || null : null,
+    directEntry: Boolean(safeView === "signer" && activeSessionId && directEntry),
+  };
+}
+
 function buildBaseUrl() {
   const url = new URL(window.location.href);
   url.search = "";
   url.hash = "";
+  return url.toString();
+}
+
+function buildRouteUrl(routeState, cloudConfig) {
+  const url = new URL(buildBaseUrl());
+
+  if (routeState.view === "signer" && routeState.activeSessionId) {
+    url.searchParams.set("sessionId", routeState.activeSessionId);
+
+    if (cloudConfig.enabled && cloudConfig.scriptUrl) {
+      url.searchParams.set("endpoint", cloudConfig.scriptUrl);
+    }
+  }
+
   return url.toString();
 }
 
@@ -64,8 +100,32 @@ function getInitialCloudConfig() {
   return readCloudConfig();
 }
 
-function getInitialView() {
-  return getInitialSessionId() ? "signer" : "landing";
+function readUrlRouteState() {
+  const sessionId = getInitialSessionId();
+
+  return createRouteState({
+    view: sessionId ? "signer" : "landing",
+    activeSessionId: sessionId,
+    directEntry: Boolean(sessionId),
+  });
+}
+
+function readHistoryRouteState(historyState) {
+  if (!historyState || historyState.marker !== HISTORY_MARKER) {
+    return null;
+  }
+
+  return createRouteState({
+    index: historyState.index,
+    view: historyState.view,
+    activeSessionId: historyState.activeSessionId,
+    reportSessionId: historyState.reportSessionId,
+    directEntry: historyState.directEntry,
+  });
+}
+
+function getInitialRouteState() {
+  return readHistoryRouteState(window.history.state) || readUrlRouteState();
 }
 
 function normalizeSignaturePayload(participant, dataUrl) {
@@ -80,20 +140,24 @@ function normalizeSignaturePayload(participant, dataUrl) {
 }
 
 export default function App() {
-  const [view, setView] = useState(getInitialView);
+  const initialCloudConfigRef = useRef(getInitialCloudConfig());
+  const initialRouteRef = useRef(getInitialRouteState());
+  const [view, setView] = useState(initialRouteRef.current.view);
   const [sessions, setSessions] = useState([]);
   const [staffList, setStaffList] = useState(() => readStaffList());
   const [lastSchoolName, setLastSchoolName] = useState(() => readLastSchool());
-  const [cloudConfig, setCloudConfig] = useState(getInitialCloudConfig);
+  const [cloudConfig, setCloudConfig] = useState(initialCloudConfigRef.current);
   const [googleClientId, setGoogleClientId] = useState(() => readGoogleClientId());
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
-  const [activeSessionId, setActiveSessionId] = useState(getInitialSessionId);
-  const [reportSessionId, setReportSessionId] = useState(null);
+  const [activeSessionId, setActiveSessionId] = useState(initialRouteRef.current.activeSessionId);
+  const [reportSessionId, setReportSessionId] = useState(initialRouteRef.current.reportSessionId);
   const [shareSessionId, setShareSessionId] = useState(null);
   const [signatureRequest, setSignatureRequest] = useState(null);
-  const directEntryRef = useRef(Boolean(getInitialSessionId()));
+  const directEntryRef = useRef(initialRouteRef.current.directEntry);
+  const historyIndexRef = useRef(initialRouteRef.current.index);
+  const cloudConfigRef = useRef(initialCloudConfigRef.current);
 
   const activeSession = useMemo(
     () => sessions.find((item) => item.id === activeSessionId) || null,
@@ -107,6 +171,46 @@ export default function App() {
     () => sessions.find((item) => item.id === shareSessionId) || null,
     [sessions, shareSessionId],
   );
+
+  function applyRouteState(routeState) {
+    directEntryRef.current = routeState.directEntry;
+    historyIndexRef.current = routeState.index;
+    setView(routeState.view);
+    setActiveSessionId(routeState.activeSessionId);
+    setReportSessionId(routeState.reportSessionId);
+    setShareSessionId(null);
+    setSignatureRequest(null);
+  }
+
+  function writeRouteState(routeState, options = {}) {
+    const { replace = false, config = cloudConfigRef.current } = options;
+    const method = replace ? "replaceState" : "pushState";
+    historyIndexRef.current = routeState.index;
+    window.history[method](routeState, "", buildRouteUrl(routeState, config));
+  }
+
+  function transitionTo(route, options = {}) {
+    const { replace = false, config } = options;
+    const nextRoute = createRouteState({
+      ...route,
+      index: replace ? historyIndexRef.current : historyIndexRef.current + 1,
+    });
+
+    applyRouteState(nextRoute);
+    writeRouteState(nextRoute, { replace, config });
+  }
+
+  function goBack(fallbackRoute) {
+    const currentRoute = readHistoryRouteState(window.history.state);
+    const currentIndex = currentRoute?.index ?? historyIndexRef.current;
+
+    if (currentIndex > 0) {
+      window.history.back();
+      return;
+    }
+
+    transitionTo(fallbackRoute, { replace: true });
+  }
 
   function notify(message, type = "success") {
     setToast({
@@ -143,6 +247,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    cloudConfigRef.current = cloudConfig;
+  }, [cloudConfig]);
+
+  useEffect(() => {
+    writeRouteState(initialRouteRef.current, {
+      replace: true,
+      config: initialCloudConfigRef.current,
+    });
+
+    function handlePopState(event) {
+      const nextRoute = readHistoryRouteState(event.state) || readUrlRouteState();
+      applyRouteState(nextRoute);
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!toast) {
       return undefined;
     }
@@ -157,23 +282,17 @@ export default function App() {
   }, [toast]);
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-
-    if (view === "signer" && activeSessionId) {
-      url.searchParams.set("sessionId", activeSessionId);
-
-      if (cloudConfig.enabled && cloudConfig.scriptUrl) {
-        url.searchParams.set("endpoint", cloudConfig.scriptUrl);
-      } else {
-        url.searchParams.delete("endpoint");
-      }
-    } else {
-      url.searchParams.delete("sessionId");
-      url.searchParams.delete("endpoint");
-    }
-
-    window.history.replaceState({}, "", url.toString());
-  }, [activeSessionId, cloudConfig, view]);
+    writeRouteState(
+      createRouteState({
+        index: historyIndexRef.current,
+        view,
+        activeSessionId,
+        reportSessionId,
+        directEntry: directEntryRef.current,
+      }),
+      { replace: true, config: cloudConfig },
+    );
+  }, [activeSessionId, cloudConfig, reportSessionId, view]);
 
   useEffect(() => {
     if (reportSession) {
@@ -287,9 +406,48 @@ export default function App() {
         await refreshSessions(cloudConfig, { silent: true });
       }
 
-      notify("연수 명단이 업데이트되었습니다.");
+      notify(`연수 명단이 업데이트되었습니다. (총 ${mergedStaff.length}명 등록)`);
     } catch (error) {
       notify(error.message || "연수 명단 업데이트에 실패했습니다.", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleUpdateSession(sessionId, payload) {
+    const session = sessions.find((item) => item.id === sessionId);
+
+    if (!session) {
+      notify("연수 정보를 다시 불러와 주세요.", "error");
+      return false;
+    }
+
+    setBusy(true);
+
+    try {
+      const nextSession = {
+        ...session,
+        authCode: payload.authCode || "",
+        date: payload.date,
+        schoolName: payload.schoolName,
+        time: payload.time,
+        title: payload.title,
+      };
+      const nextSessions = await upsertSession(cloudConfig, nextSession);
+
+      if (nextSessions) {
+        setSessions(nextSessions);
+      } else {
+        await refreshSessions(cloudConfig, { silent: true });
+      }
+
+      writeLastSchool(payload.schoolName);
+      setLastSchoolName(payload.schoolName);
+      notify("연수 정보가 수정되었습니다.");
+      return true;
+    } catch (error) {
+      notify(error.message || "연수 수정에 실패했습니다.", "error");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -329,9 +487,9 @@ export default function App() {
     try {
       config = nextConfig.enabled
         ? {
-            enabled: true,
-            scriptUrl: validateScriptUrl(nextConfig.scriptUrl),
-          }
+          enabled: true,
+          scriptUrl: validateScriptUrl(nextConfig.scriptUrl),
+        }
         : DEFAULT_CLOUD_CONFIG;
     } catch (error) {
       notify(error.message || "클라우드 URL을 다시 확인해 주세요.", "error");
@@ -344,7 +502,7 @@ export default function App() {
     setGoogleClientId(nextConfig.googleClientId || "");
 
     await refreshSessions(config, { silent: true });
-    setView("admin");
+    transitionTo({ view: "admin" }, { config });
     notify(config.enabled ? "구글 연동 설정이 저장되었습니다." : "로컬 모드로 전환되었습니다.");
   }
 
@@ -355,29 +513,38 @@ export default function App() {
       return;
     }
 
-    setView("cloud_setup");
+    transitionTo({ view: "cloud_setup" });
   }
 
   function openSignerHome() {
-    directEntryRef.current = false;
-    setActiveSessionId(null);
-    setView("signer");
+    transitionTo({
+      view: "signer",
+      activeSessionId: null,
+      directEntry: false,
+    });
   }
 
   function openSignerSession(sessionId) {
-    directEntryRef.current = false;
-    setActiveSessionId(sessionId);
-    setView("signer");
+    transitionTo({
+      view: "signer",
+      activeSessionId: sessionId,
+      directEntry: false,
+    });
   }
 
   function clearSignerSelection() {
-    setActiveSessionId(null);
-    setView("signer");
+    goBack({
+      view: "signer",
+      activeSessionId: null,
+      directEntry: false,
+    });
   }
 
   function openReport(sessionId) {
-    setReportSessionId(sessionId);
-    setView("report");
+    transitionTo({
+      view: "report",
+      reportSessionId: sessionId,
+    });
   }
 
   function openShare(session) {
@@ -480,7 +647,7 @@ export default function App() {
       {view === "landing" ? (
         <LandingView
           cloudEnabled={cloudConfig.enabled}
-          onOpenAdmin={() => setView("admin")}
+          onOpenAdmin={() => transitionTo({ view: "admin" })}
           onOpenCloud={handleStartCloudFlow}
           onOpenSigner={openSignerHome}
         />
@@ -492,15 +659,16 @@ export default function App() {
           cloudEnabled={cloudConfig.enabled}
           initialSchoolName={lastSchoolName}
           notify={notify}
-          onBack={() => setView("landing")}
+          onBack={() => goBack({ view: "landing" })}
           onClearDefaultStaffList={handleClearDefaultStaffList}
           onCreateSession={handleCreateSession}
           onDeleteSession={handleDeleteSession}
-          onOpenCloud={() => setView("cloud_setup")}
+          onOpenCloud={() => transitionTo({ view: "cloud_setup" })}
           onOpenReport={openReport}
           onOpenShare={openShare}
           onRefresh={() => refreshSessions(cloudConfig)}
           onReplaceSessionStaffList={handleReplaceSessionStaffList}
+          onUpdateSession={handleUpdateSession}
           onUpdateDefaultStaffList={handleUpdateDefaultStaffList}
           sessions={sessions}
           staffList={staffList}
@@ -512,7 +680,7 @@ export default function App() {
           busy={busy}
           currentConfig={cloudConfig}
           googleClientId={googleClientId}
-          onBack={() => setView("admin")}
+          onBack={() => goBack({ view: "admin" })}
           onSave={handleSaveCloudConfig}
           onTest={testScriptUrl}
         />
@@ -533,7 +701,7 @@ export default function App() {
       {view === "report" && reportSession ? (
         <PrintPreview
           busy={busy}
-          onClose={() => setView("admin")}
+          onClose={() => goBack({ view: "admin" })}
           onDeleteSignature={handleDeleteSignature}
           session={reportSession}
         />

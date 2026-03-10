@@ -16,20 +16,11 @@ export default function LandingView({
         <span className="version-pill">{APP_VERSION}</span>
         <div className="landing-copy">
           <p className="eyebrow">연수 운영 서비스</p>
-          <h1>
-            {APP_NAME}
-            <br />
-            <span>연수 생성, 서명, 출력까지 한 번에</span>
-          </h1>
-          <p className="landing-author">제작: HooniKim</p>
+          <h1 className="landing-title">{APP_NAME}</h1>
+          <p className="landing-subtitle">연수 생성, 서명, 출력까지 한 번에</p>
+
           <p className="landing-caption">
             {APP_DESCRIPTION}
-            <br />
-            문의는{" "}
-            <a href="https://open.kakao.com/o/scEWSgwf" target="_blank" rel="noreferrer">
-              오픈카톡방
-            </a>
-            으로 보내주세요.
           </p>
         </div>
 
@@ -51,7 +42,7 @@ export default function LandingView({
         </div>
 
         <p className="landing-footer">
-          © {currentYear} HooniKim. 모든 권리는 HooniKim에게 있습니다.
+          &copy; {currentYear} HooniKim. All rights reserved.
         </p>
       </div>
     </section>

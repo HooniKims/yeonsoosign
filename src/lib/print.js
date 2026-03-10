@@ -7,6 +7,22 @@ function makePositionRankMap(positionOrder) {
 }
 
 function buildRecords(session) {
+  if (session.staffList && session.staffList.length > 0) {
+    const signatureMap = new Map((session.signatures || []).map((s) => [s.staffId, s]));
+    return session.staffList.map((staff, index) => {
+      const signature = signatureMap.get(staff.id);
+      return {
+        no: index + 1,
+        staffId: staff.id,
+        affiliation: staff.affiliation || "",
+        position: staff.department || "",
+        name: staff.name || "",
+        signatureData: signature?.signatureData || "",
+      };
+    });
+  }
+
+  // 외부 연수 등 staffList가 빈 경우 서명자 목록 기반으로 렌더링
   return (session.signatures || []).map((signature, index) => ({
     no: index + 1,
     staffId: signature.staffId,
