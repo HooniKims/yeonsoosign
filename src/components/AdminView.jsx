@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { buildStaffTemplateBlob, parseStaffFile, STAFF_TEMPLATE_FILE_NAME } from "../lib/staff";
 import { saveAs } from "file-saver";
-import { Building, Building2, Calendar, PenLine } from "lucide-react";
+import { Building, Building2, Calendar, PenLine, RefreshCw, Settings } from "lucide-react";
+import { buildStaffTemplateBlob, parseStaffFile, STAFF_TEMPLATE_FILE_NAME } from "../lib/staff";
 
 function buildSessionDraft(session) {
   return {
@@ -17,7 +17,7 @@ function buildSessionDraft(session) {
 function SessionBadge({ type }) {
   return (
     <span className={`session-badge ${type === "office" ? "session-badge-office" : ""}`}>
-      {type === "office" ? "외부" : "학교"}
+      {type === "office" ? "기관" : "학교"}
     </span>
   );
 }
@@ -25,12 +25,12 @@ function SessionBadge({ type }) {
 function SessionCard({
   busy,
   notify,
-  session,
   onDeleteSession,
   onOpenReport,
   onOpenShare,
   onUpdateSession,
   onUpdateStaff,
+  session,
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(() => buildSessionDraft(session));
@@ -38,7 +38,7 @@ function SessionCard({
   useEffect(() => {
     setDraft(buildSessionDraft(session));
     setIsEditing(false);
-  }, [session.authCode, session.date, session.id, session.schoolName, session.time, session.title]);
+  }, [session]);
 
   function updateDraft(field, value) {
     setDraft((current) => ({
@@ -56,12 +56,12 @@ function SessionCard({
     event.preventDefault();
 
     if (!draft.title.trim() || !draft.schoolName.trim() || !draft.date.trim()) {
-      notify("연수명, 기관명, 날짜를 모두 입력해주세요.", "error");
+      notify("연수명, 기관명, 날짜를 모두 입력해 주세요.", "error");
       return;
     }
 
     if (draft.useAuth && !draft.authCode.trim()) {
-      notify("인증 비밀번호를 입력해주세요.", "error");
+      notify("인증 비밀번호를 입력해 주세요.", "error");
       return;
     }
 
@@ -101,27 +101,27 @@ function SessionCard({
           <div className="form-grid session-edit-grid">
             <input
               className="text-input"
+              onChange={(event) => updateDraft("title", event.target.value)}
               placeholder="연수명"
               value={draft.title}
-              onChange={(event) => updateDraft("title", event.target.value)}
             />
             <input
               className="text-input"
+              onChange={(event) => updateDraft("schoolName", event.target.value)}
               placeholder="기관명"
               value={draft.schoolName}
-              onChange={(event) => updateDraft("schoolName", event.target.value)}
             />
             <input
               className="text-input"
+              onChange={(event) => updateDraft("date", event.target.value)}
               type="date"
               value={draft.date}
-              onChange={(event) => updateDraft("date", event.target.value)}
             />
             <input
               className="text-input"
+              onChange={(event) => updateDraft("time", event.target.value)}
               placeholder="시간 (예: 15:00~17:00)"
               value={draft.time}
-              onChange={(event) => updateDraft("time", event.target.value)}
             />
           </div>
 
@@ -137,9 +137,9 @@ function SessionCard({
           {draft.useAuth ? (
             <input
               className="text-input"
+              onChange={(event) => updateDraft("authCode", event.target.value)}
               placeholder="비밀번호"
               value={draft.authCode}
-              onChange={(event) => updateDraft("authCode", event.target.value)}
             />
           ) : null}
 
@@ -175,7 +175,8 @@ function SessionCard({
               </span>
               <span className="session-card-divider">|</span>
               <strong className="session-card-meta-item session-card-meta-strong">
-                <PenLine size={14} /> {(session.staffList || []).length}명 중 {(session.signatures || []).length}명 서명
+                <PenLine size={14} /> {(session.staffList || []).length}명 중 {(session.signatures || []).length}명
+                서명
               </strong>
             </p>
           </div>
@@ -206,6 +207,8 @@ function SessionCard({
 }
 
 export default function AdminView({
+  adminEmail,
+  adminName,
   busy,
   cloudEnabled,
   initialSchoolName,
@@ -219,8 +222,10 @@ export default function AdminView({
   onOpenShare,
   onRefresh,
   onReplaceSessionStaffList,
+  onSignOut,
   onUpdateSession,
   onUpdateDefaultStaffList,
+  schoolName,
   sessions,
   staffList,
 }) {
@@ -236,6 +241,13 @@ export default function AdminView({
   const baseUploadRef = useRef(null);
   const updateUploadRef = useRef(null);
   const updateTargetIdRef = useRef(null);
+
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      schoolName: current.schoolName || initialSchoolName,
+    }));
+  }, [initialSchoolName]);
 
   const sessionSummary = useMemo(() => `${staffList.length}명`, [staffList.length]);
 
@@ -254,7 +266,7 @@ export default function AdminView({
       return;
     }
 
-    onUpdateDefaultStaffList(list);
+    await onUpdateDefaultStaffList(list);
   }
 
   async function handleSessionUpload(file, sessionId) {
@@ -272,17 +284,17 @@ export default function AdminView({
     event.preventDefault();
 
     if (!form.title.trim() || !form.schoolName.trim() || !form.date.trim()) {
-      notify("필수 항목을 모두 입력해주세요.", "error");
+      notify("필수 항목을 모두 입력해 주세요.", "error");
       return;
     }
 
     if (form.type === "school" && staffList.length === 0) {
-      notify("학교용 연수는 기본 교직원 명단이 필요합니다.", "error");
+      notify("학교형 연수에는 기본 교직원 명단이 필요합니다.", "error");
       return;
     }
 
     if (form.useAuth && !form.authCode.trim()) {
-      notify("인증 비밀번호를 입력해주세요.", "error");
+      notify("인증 비밀번호를 입력해 주세요.", "error");
       return;
     }
 
@@ -313,14 +325,25 @@ export default function AdminView({
     <section className="page-shell dashboard-shell">
       <header className="dashboard-header">
         <div>
-          <h1>관리자 대시보드</h1>
+          <p className="eyebrow">Admin Dashboard</p>
+          <h1>{schoolName || "학교"} 관리자 화면</h1>
+          <p className="muted-copy">
+            {adminName || "관리자"}
+            {adminEmail ? ` · ${adminEmail}` : ""}
+          </p>
         </div>
         <div className="dashboard-header-actions">
-          <button className="mini-button mini-button-blue" onClick={onOpenCloud}>
-            구글 연동 설정
+          <button className="mini-button mini-button-blue" onClick={onRefresh} type="button">
+            <RefreshCw size={15} /> 새로고침
           </button>
-          <button className="ghost-button" onClick={onBack}>
-            나가기
+          <button className="mini-button" onClick={onOpenCloud} type="button">
+            <Settings size={15} /> 학교 설정
+          </button>
+          <button className="ghost-button" onClick={onSignOut} type="button">
+            로그아웃
+          </button>
+          <button className="ghost-button" onClick={onBack} type="button">
+            닫기
           </button>
         </div>
       </header>
@@ -330,17 +353,17 @@ export default function AdminView({
           <section className="surface-card surface-card-accent">
             <div className="section-heading">
               <div>
-                <h2>교직원 명단 관리 (학교용)</h2>
+                <h2>기본 교직원 명단 캐시</h2>
                 <p className="muted-copy">
-                  현재 등록된 교직원: <strong>{sessionSummary}</strong>
+                  현재 등록된 기본 명단 <strong>{sessionSummary}</strong>
                 </p>
                 <p className="micro-copy">
-                  외부공개연수(교육청/타학교) 생성 시에는 명단이 필요하지 않습니다.
+                  이 명단은 새 학교형 연수를 만들 때만 복사됩니다. 기존 연수 목록은 그대로 유지됩니다.
                 </p>
               </div>
 
               <div className="button-row">
-                <button className="mini-button mini-button-danger" onClick={onClearDefaultStaffList}>
+                <button className="mini-button mini-button-danger" onClick={onClearDefaultStaffList} type="button">
                   명단 초기화
                 </button>
                 <button
@@ -350,22 +373,23 @@ export default function AdminView({
                       const blob = await buildStaffTemplateBlob();
                       saveAs(blob, STAFF_TEMPLATE_FILE_NAME);
                     } catch (error) {
-                      notify("양식 다운로드에 실패했습니다.", "error");
+                      notify("서식 다운로드에 실패했습니다.", "error");
                     }
                   }}
+                  type="button"
                 >
-                  양식 다운로드
+                  서식 다운로드
                 </button>
-                <button className="mini-button" onClick={() => baseUploadRef.current?.click()}>
-                  명단 업로드 (Excel)
+                <button className="mini-button" onClick={() => baseUploadRef.current?.click()} type="button">
+                  명단 업로드(Excel)
                 </button>
                 <input
                   ref={baseUploadRef}
                   accept=".xlsx,.xls,.csv,.txt"
                   className="hidden-input"
-                  type="file"
                   onChange={async (event) => {
                     const file = event.target.files?.[0];
+
                     if (!file) {
                       return;
                     }
@@ -378,6 +402,7 @@ export default function AdminView({
                       event.target.value = "";
                     }
                   }}
+                  type="file"
                 />
               </div>
             </div>
@@ -388,6 +413,7 @@ export default function AdminView({
           <div className="section-heading">
             <div>
               <h2>새 연수 등록</h2>
+              <p className="micro-copy">현재 저장 위치: {cloudEnabled ? "학교 GAS 저장소" : "학교 설정 필요"}</p>
             </div>
           </div>
 
@@ -399,7 +425,7 @@ export default function AdminView({
                   onChange={() => updateField("type", "school")}
                   type="radio"
                 />
-                <Building size={18} style={{ marginRight: "6px" }} /> 학교용
+                <Building size={18} style={{ marginRight: "6px" }} /> 학교형
               </label>
               <label className={`toggle-card ${form.type === "office" ? "is-active" : ""}`}>
                 <input
@@ -407,34 +433,34 @@ export default function AdminView({
                   onChange={() => updateField("type", "office")}
                   type="radio"
                 />
-                <Building2 size={18} style={{ marginRight: "6px" }} /> 외부공개
+                <Building2 size={18} style={{ marginRight: "6px" }} /> 기관 공개
               </label>
             </div>
 
             <div className="form-grid">
               <input
                 className="text-input"
+                onChange={(event) => updateField("title", event.target.value)}
                 placeholder="연수명"
                 value={form.title}
-                onChange={(event) => updateField("title", event.target.value)}
               />
               <input
                 className="text-input"
+                onChange={(event) => updateField("schoolName", event.target.value)}
                 placeholder="기관명"
                 value={form.schoolName}
-                onChange={(event) => updateField("schoolName", event.target.value)}
               />
               <input
                 className="text-input"
+                onChange={(event) => updateField("date", event.target.value)}
                 type="date"
                 value={form.date}
-                onChange={(event) => updateField("date", event.target.value)}
               />
               <input
                 className="text-input"
+                onChange={(event) => updateField("time", event.target.value)}
                 placeholder="시간 (예: 15:00~17:00)"
                 value={form.time}
-                onChange={(event) => updateField("time", event.target.value)}
               />
             </div>
 
@@ -450,9 +476,9 @@ export default function AdminView({
             {form.useAuth ? (
               <input
                 className="text-input"
+                onChange={(event) => updateField("authCode", event.target.value)}
                 placeholder="비밀번호"
                 value={form.authCode}
-                onChange={(event) => updateField("authCode", event.target.value)}
               />
             ) : null}
 
@@ -466,10 +492,8 @@ export default function AdminView({
           <div className="section-heading">
             <div>
               <h2>등록된 연수 목록</h2>
+              <p className="micro-copy">기존 연수는 새 명단 업로드와 무관하게 그대로 유지됩니다.</p>
             </div>
-            <button className="mini-button mini-button-blue" onClick={onRefresh}>
-              전체 새로고침
-            </button>
           </div>
 
           <div className="session-list">
@@ -492,7 +516,7 @@ export default function AdminView({
               ))
             ) : (
               <div className="empty-compact">
-                <p>{cloudEnabled ? "클라우드 저장소" : "로컬 저장소"}에 등록된 연수가 없습니다.</p>
+                <p>{cloudEnabled ? "학교 GAS 저장소" : "현재 학교 설정"}에 등록된 연수가 없습니다.</p>
               </div>
             )}
           </div>
@@ -503,7 +527,6 @@ export default function AdminView({
         ref={updateUploadRef}
         accept=".xlsx,.xls,.csv,.txt"
         className="hidden-input"
-        type="file"
         onChange={async (event) => {
           const file = event.target.files?.[0];
           const targetId = updateTargetIdRef.current;
@@ -521,6 +544,7 @@ export default function AdminView({
             updateTargetIdRef.current = null;
           }
         }}
+        type="file"
       />
     </section>
   );

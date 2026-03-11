@@ -1,7 +1,7 @@
 # Next Session Tasks
 
 검증 일시: 2026-03-11  
-현재 기준: 우선 이슈 1~11 반영 완료, 실제 브라우저 수동 E2E만 후속 확인 권장
+현재 기준: 우선 이슈 1~12 반영 완료, Firebase/Vercel 핵심 설정 반영 완료, 실브라우저 수동 E2E 및 실운영 GAS 확인 후속 권장
 
 ## 이번 세션 반영 완료
 
@@ -185,7 +185,77 @@
   - 영향 범위: 로컬 개발 서버뿐 아니라 별도 도메인으로 배포한 프런트에서도 동일하게 발생 가능한 구조였음
   - 이번 수정은 기존 Web App URL과 현재 Apps Script 코드 기준으로도 동작하도록 프런트 측 저장 확인 흐름을 조정한 대응임
 
+### 12. Firebase 관리자 인증 + Firestore 학교 설정 + NEIS 학교 검색 구조 전환
+- 상태: 완료
+- 처리 내용:
+  1. `Firebase Auth` 기반 관리자 인증 흐름 추가
+     - 이메일/비밀번호 가입/로그인
+     - Google 계정 가입/로그인
+  2. 가입 시 학교명 자유 입력 대신 `NEIS` 검색 결과 선택이 필수이도록 UI/검증 추가
+  3. `Vercel /api/schools` 서버 함수 추가
+     - `NEIS_API_KEY`는 환경변수에서만 사용
+     - 프런트는 `/api/schools`만 호출하도록 분리
+  4. 학교별 설정을 `Firestore` 기준으로 전환
+     - `admins/{uid}`: `schoolId`, `schoolName`, `role`, `status`
+     - `schools/{schoolId}`: `schoolName`, `gasWebAppUrl`, `enabled`
+     - `schoolPrivate/{schoolId}`: `defaultStaffCache`
+  5. 기본 교직원 명단을 브라우저 `localStorage` 대신 학교별 `schoolPrivate/{schoolId}.defaultStaffCache`로 저장하도록 변경
+  6. 관리자 랜딩 흐름 정리
+     - `관리자 로그인/가입`
+     - `학교 설정 보기`
+     - `참여자 서명하기`
+  7. 학교별 `GAS` 주소가 없으면 관리자 화면 대신 학교 설정 화면으로 유도되도록 변경
+  8. 공유 링크를 `schoolId + sessionId` 기반으로 생성하도록 변경
+     - 비로그인 참여자는 가입 없이 QR 링크로 접속 후 서명만 수행
+  9. 기존 연수/서명/출력/PDF 데이터 저장은 계속 `GAS`를 사용하도록 유지
+- 관련 파일:
+  - `src/App.jsx`
+  - `src/components/AuthView.jsx`
+  - `src/components/LandingView.jsx`
+  - `src/components/CloudSetupView.jsx`
+  - `src/components/AdminView.jsx`
+  - `src/lib/firebase.js`
+  - `src/lib/auth.js`
+  - `src/lib/schools.js`
+  - `api/schools.js`
+  - `.env.example`
+  - `package.json`
+- 메모:
+  - 학교 검색은 브라우저에서 NEIS 키를 직접 쓰지 않고 Vercel 서버 함수 뒤에 숨김
+  - 기존 `endpoint` 공유 링크도 호환을 위해 fallback으로 일부 유지
+  - 실제 운영 전 `Firebase Auth provider`, `Vercel env`, `Firestore Rules` 설정 필요
+
 ## 남은 후속 권장 작업
-1. 실제 브라우저에서 로컬 모드 수동 E2E 한 번 더 확인
-2. 실제 Google Apps Script URL로 `엑셀 업로드 -> 연수 등록 -> 서명 -> 삭제`까지 클라우드 모드 수동 E2E 확인
-3. 필요하면 `sessions` / `staff` 로직을 Vitest로 고정
+1. 실제 브라우저에서 관리자 가입/로그인 수동 E2E 확인
+   - 이메일 가입
+   - Google 가입
+   - 학교 검색 후 선택 없이는 가입 불가 확인
+2. 실제 브라우저에서 학교 설정 수동 E2E 확인
+   - GAS 주소 저장
+   - 저장 후 기존 연수 목록 조회
+   - 다른 브라우저 로그인 시 동일 학교 설정 재사용
+3. 실제 Google Apps Script URL로 `엑셀 업로드 -> 연수 등록 -> QR 접속 -> 서명 -> 출력/PDF -> 삭제`까지 수동 E2E 확인
+4. 필요하면 다음 단계에서 `Firestore Rules`와 `Firebase 초기 설정 가이드`를 문서화하거나 `sessions` / `staff` / `auth` 로직 테스트를 추가
+
+## 이번 후속 진행 내역
+- 저장소 기준 선반영 완료
+  - `firestore.rules` 추가
+  - `firebase.json` 추가
+  - `docs/firebase-setup-guide.md` 추가
+  - 공개 학교 설정은 `schools/{schoolId}`, 관리자 전용 기본 명단은 `schoolPrivate/{schoolId}`로 분리
+  - 공유 링크 진입 시에는 public-only 학교 설정만 읽도록 `src/lib/schools.js`, `src/App.jsx` 구조 조정
+  - `schoolPrivate` 문서는 가입 시 자동 생성하지 않고, 관리자 명단 저장 시점에만 생성되도록 보안 정책 보강
+  - `vitest` 기반 자동화 테스트 추가
+    - `api/schools.test.js`
+    - `src/lib/auth.test.js`
+    - `src/lib/sessions.test.js`
+    - `src/lib/staff.test.js`
+  - `npm test`, `npm run build` 검증 통과
+- 사용자 실설정 완료 보고 반영
+  - Vercel 환경변수 입력 완료
+  - Firestore Rules 적용 완료
+  - Firebase Authentication `Email/Password`, `Google` provider 활성화 완료
+  - Firebase Authorized Domains 추가 완료
+- 아직 외부에서 직접 해야 하는 작업
+  - 실제 브라우저 수동 E2E
+  - 실제 Google Apps Script 운영 URL 검증

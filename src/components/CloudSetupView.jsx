@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { APPS_SCRIPT_SNIPPET } from "../lib/constants";
 import { validateScriptUrl } from "../lib/sessions";
 
@@ -24,19 +24,23 @@ function buildValidatedUrl(scriptUrl) {
 }
 
 export default function CloudSetupView({
+  adminEmail,
   busy,
   currentConfig,
-  googleClientId,
   onBack,
   onSave,
   onTest,
+  schoolName,
 }) {
   const [scriptUrl, setScriptUrl] = useState(currentConfig.scriptUrl || "");
-  const [clientId, setClientId] = useState(googleClientId || "");
   const [testState, setTestState] = useState({
     status: "idle",
     message: "",
   });
+
+  useEffect(() => {
+    setScriptUrl(currentConfig.scriptUrl || "");
+  }, [currentConfig.scriptUrl]);
 
   async function handleTest() {
     const validation = buildValidatedUrl(scriptUrl);
@@ -48,17 +52,17 @@ export default function CloudSetupView({
 
     setTestState({
       status: "loading",
-      message: "연동 상태를 확인하고 있습니다...",
+      message: "연결 상태를 확인하고 있습니다...",
     });
 
     try {
       const count = await onTest(validation.value);
       setTestState({
         status: "success",
-        message: `연동 성공: 현재 ${count}개의 연수 데이터를 읽을 수 있습니다.`,
+        message: `연결 성공: 현재 ${count}개의 연수 데이터를 읽을 수 있습니다.`,
       });
     } catch (error) {
-      setTestState(buildErrorState(error.message || "테스트에 실패했습니다."));
+      setTestState(buildErrorState(error.message || "연결 테스트에 실패했습니다."));
     }
   }
 
@@ -73,11 +77,10 @@ export default function CloudSetupView({
     await onSave({
       enabled: true,
       scriptUrl: validation.value,
-      googleClientId: clientId.trim(),
     });
   }
 
-  async function copyCode() {
+  async function handleCopyCode() {
     await navigator.clipboard.writeText(APPS_SCRIPT_SNIPPET);
     setTestState({
       status: "success",
@@ -91,8 +94,12 @@ export default function CloudSetupView({
         <div className="cloud-layout">
           <header className="page-header page-header-tight">
             <div>
-              <p className="eyebrow">클라우드 연동</p>
-              <h1>구글 드라이브 연동 설정</h1>
+              <p className="eyebrow">School Setup</p>
+              <h1>학교 Apps Script 연결 설정</h1>
+              <p className="muted-copy">
+                {schoolName || "학교"} 관리자 계정
+                {adminEmail ? ` · ${adminEmail}` : ""}
+              </p>
             </div>
             <button className="ghost-button" onClick={onBack} type="button">
               이전 화면
@@ -101,27 +108,22 @@ export default function CloudSetupView({
 
           <div className="cloud-notice-stack">
             <article className="notice-card notice-card-warm cloud-note-card">
-              <h3>학교/기관 계정(Workspace) 사용 시 주의사항</h3>
+              <h3>설정 방식</h3>
               <p>
-                학교 또는 교육청 계정은 보안상 외부 공개 배포를 막는 경우가 많습니다. 테스트가 실패하면{" "}
-                <strong>개인 Gmail 계정</strong>으로 Apps Script를 배포하는 편이 안정적입니다.
-                <br />
-                (구글 연동을 통해 다른 PC에서도 연수 데이터를 그대로 불러올 수 있습니다.)
+                학교별 Google Apps Script Web App URL을 한 번 등록하면 같은 학교의 관리자들은 어느
+                브라우저에서 로그인해도 같은 연수 데이터를 조회할 수 있습니다.
               </p>
             </article>
 
             <article className="notice-card notice-card-cool cloud-note-card">
-              <h3>계정 넘기기 설정 (선택 사항)</h3>
+              <h3>권장 흐름</h3>
               <p>
-                다른 컴퓨터에서도 설정을 공유하려면 Google Client ID를 기록해 두세요. 현재 앱에서 OAuth
-                로그인 자체를 사용하지는 않고 설정 보관용으로만 입력받습니다.
+                1. 아래 코드로 Apps Script를 배포합니다.
+                <br />
+                2. 발급된 Web App URL을 저장합니다.
+                <br />
+                3. 저장 후 테스트에 성공하면 관리자 화면에서 기존 연수 목록을 계속 조회할 수 있습니다.
               </p>
-              <input
-                className="text-input mono-input"
-                onChange={(event) => setClientId(event.target.value)}
-                placeholder="123456789-abc.apps.googleusercontent.com"
-                value={clientId}
-              />
             </article>
           </div>
 
@@ -130,28 +132,19 @@ export default function CloudSetupView({
               <div className="section-heading">
                 <div>
                   <p className="eyebrow">Step 1</p>
-                  <h2>Apps Script 코드 업데이트</h2>
+                  <h2>Apps Script 코드 복사</h2>
                 </div>
-                <button className="mini-button" onClick={copyCode} type="button">
+                <button className="mini-button" onClick={handleCopyCode} type="button">
                   코드 복사
                 </button>
               </div>
 
               <ol className="plain-list plain-list-numbered">
-                <li>
-                  우측 상단의 <strong>[코드 복사]</strong> 버튼을 눌러 스크립트를 복사하세요.
-                </li>
-                <li>Google Apps Script의 새 프로젝트를 열고, 복사한 코드를 붙여넣습니다.</li>
-                <li>
-                  <strong>[배포] → [새 배포]</strong>를 클릭하고, 유형을{" "}
-                  <strong>&quot;웹 앱(Web App)&quot;</strong>으로 선택합니다.
-                </li>
-                <li>
-                  액세스 권한을 <strong>&quot;모든 사용자(Anyone)&quot;</strong>로 설정한 뒤 배포합니다.
-                </li>
-                <li>
-                  생성된 <strong>웹 앱 URL</strong>을 복사하여 아래 Step 2에 입력하세요.
-                </li>
+                <li>Google Apps Script에서 새 프로젝트를 만듭니다.</li>
+                <li>기존 코드를 지우고 아래 코드를 붙여 넣습니다.</li>
+                <li>배포 &gt; 새 배포 &gt; 웹 앱으로 배포를 선택합니다.</li>
+                <li>접근 권한은 서명 참여자가 접속할 수 있도록 공개 범위로 설정합니다.</li>
+                <li>생성된 Web App URL을 복사해 아래 입력칸에 붙여 넣습니다.</li>
               </ol>
 
               <pre className="code-panel">{APPS_SCRIPT_SNIPPET}</pre>
@@ -161,7 +154,7 @@ export default function CloudSetupView({
               <div className="section-heading">
                 <div>
                   <p className="eyebrow">Step 2</p>
-                  <h2>배포 URL 입력 및 테스트</h2>
+                  <h2>학교 URL 등록 및 연결 테스트</h2>
                 </div>
               </div>
 
@@ -183,7 +176,7 @@ export default function CloudSetupView({
                     onClick={handleTest}
                     type="button"
                   >
-                    {testState.status === "loading" ? "확인 중..." : "연동 테스트 실행"}
+                    {testState.status === "loading" ? "확인 중..." : "연결 테스트"}
                   </button>
                   <button
                     className="action-button action-button-secondary"
@@ -192,12 +185,11 @@ export default function CloudSetupView({
                       onSave({
                         enabled: false,
                         scriptUrl: "",
-                        googleClientId: clientId.trim(),
                       })
                     }
                     type="button"
                   >
-                    로컬 모드로 전환
+                    학교 설정 해제
                   </button>
                 </div>
 
@@ -208,10 +200,8 @@ export default function CloudSetupView({
                 ) : null}
 
                 <div className="config-summary">
-                  <p>설정 저장 후에는 관리자 화면에서 동일한 CRUD가 클라우드로 전환됩니다.</p>
-                  <p>
-                    현재 상태: {currentConfig.enabled ? "클라우드 사용 중" : "로컬 저장소 사용 중"}
-                  </p>
+                  <p>현재 학교: {schoolName || "미지정"}</p>
+                  <p>현재 상태: {currentConfig.enabled ? "GAS 연결 사용 중" : "GAS 주소 미설정"}</p>
                 </div>
 
                 <div className="button-row button-row-end">
@@ -224,7 +214,7 @@ export default function CloudSetupView({
                     onClick={handleSaveCloud}
                     type="button"
                   >
-                    저장 및 완료
+                    학교 설정 저장
                   </button>
                 </div>
               </div>

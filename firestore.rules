@@ -1,0 +1,129 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function hasAdminProfile() {
+      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function requesterSchoolId() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.schoolId;
+    }
+
+    function isSchoolAdmin(schoolId) {
+      return hasAdminProfile() && requesterSchoolId() == schoolId;
+    }
+
+    function allowedAdminStatuses() {
+      return ["pending_setup", "active"];
+    }
+
+    function hasOnlyAdminFields(data) {
+      return data.keys().hasOnly([
+        "uid",
+        "email",
+        "displayName",
+        "schoolId",
+        "schoolName",
+        "role",
+        "status",
+        "createdAt",
+        "updatedAt",
+      ]);
+    }
+
+    function isValidAdminCreate(uid) {
+      return hasOnlyAdminFields(request.resource.data)
+        && request.resource.data.uid == uid
+        && request.resource.data.role == "admin"
+        && request.resource.data.schoolId is string
+        && request.resource.data.schoolId.size() > 0
+        && request.resource.data.schoolName is string
+        && request.resource.data.status in allowedAdminStatuses();
+    }
+
+    function isValidAdminUpdate() {
+      return hasOnlyAdminFields(request.resource.data)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.schoolId == resource.data.schoolId
+        && request.resource.data.schoolName == resource.data.schoolName
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.status in allowedAdminStatuses();
+    }
+
+    function hasOnlyPublicSchoolFields(data) {
+      return data.keys().hasOnly([
+        "schoolId",
+        "schoolName",
+        "officeCode",
+        "officeName",
+        "schoolCode",
+        "schoolKind",
+        "address",
+        "homepage",
+        "gasWebAppUrl",
+        "enabled",
+        "createdAt",
+        "updatedAt",
+      ]);
+    }
+
+    function isValidPublicSchoolCreate(schoolId) {
+      return hasOnlyPublicSchoolFields(request.resource.data)
+        && request.resource.data.schoolId == schoolId
+        && request.resource.data.schoolName is string
+        && request.resource.data.gasWebAppUrl == ""
+        && request.resource.data.enabled == false;
+    }
+
+    function isValidPublicSchoolUpdate(schoolId) {
+      return hasOnlyPublicSchoolFields(request.resource.data)
+        && request.resource.data.schoolId == schoolId
+        && request.resource.data.schoolName is string
+        && request.resource.data.gasWebAppUrl is string
+        && request.resource.data.enabled == (request.resource.data.gasWebAppUrl.size() > 0);
+    }
+
+    function hasOnlyPrivateSchoolFields(data) {
+      return data.keys().hasOnly([
+        "defaultStaffCache",
+        "createdAt",
+        "updatedAt",
+      ]);
+    }
+
+    function isValidPrivateSchoolWrite() {
+      return hasOnlyPrivateSchoolFields(request.resource.data)
+        && request.resource.data.defaultStaffCache is list;
+    }
+
+    match /admins/{uid} {
+      allow read: if isSelf(uid);
+      allow create: if isSelf(uid) && isValidAdminCreate(uid);
+      allow update: if isSelf(uid) && isValidAdminUpdate();
+      allow delete: if false;
+    }
+
+    match /schools/{schoolId} {
+      allow read: if true;
+      allow create: if signedIn() && isValidPublicSchoolCreate(schoolId);
+      allow update: if isSchoolAdmin(schoolId) && isValidPublicSchoolUpdate(schoolId);
+      allow delete: if false;
+    }
+
+    match /schoolPrivate/{schoolId} {
+      allow read: if isSchoolAdmin(schoolId);
+      allow create: if isSchoolAdmin(schoolId) && isValidPrivateSchoolWrite();
+      allow update: if isSchoolAdmin(schoolId) && isValidPrivateSchoolWrite();
+      allow delete: if false;
+    }
+  }
+}

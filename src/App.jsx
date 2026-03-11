@@ -1,5 +1,6 @@
-﻿import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import AdminView from "./components/AdminView";
+import AuthView from "./components/AuthView";
 import CloudSetupView from "./components/CloudSetupView";
 import LandingView from "./components/LandingView";
 import PrintPreview from "./components/PrintPreview";
@@ -7,6 +8,16 @@ import ShareDialog from "./components/ShareDialog";
 import SignatureModal from "./components/SignatureModal";
 import SignerView from "./components/SignerView";
 import { APP_NAME, DEFAULT_CLOUD_CONFIG } from "./lib/constants";
+import { signInWithEmail, signInWithGoogle, signOutAdmin, signUpWithEmail, subscribeToAuthState } from "./lib/auth";
+import { hasFirebaseConfig } from "./lib/firebase";
+import {
+  readSchoolConfigById,
+  saveDefaultStaffCache,
+  saveSchoolConfig,
+  subscribeToAdminProfile,
+  subscribeToSchoolConfig,
+  updateAdminStatus,
+} from "./lib/schools";
 import {
   addSignatureBatch,
   deleteSession,
@@ -16,20 +27,10 @@ import {
   upsertSession,
   validateScriptUrl,
 } from "./lib/sessions";
-import {
-  createId,
-  readCloudConfig,
-  readGoogleClientId,
-  readLastSchool,
-  readStaffList,
-  writeCloudConfig,
-  writeGoogleClientId,
-  writeLastSchool,
-  writeStaffList,
-} from "./lib/storage";
+import { createId } from "./lib/storage";
 
 const HISTORY_MARKER = "yeonsoo-sign-route";
-const VALID_VIEWS = new Set(["landing", "admin", "cloud_setup", "signer", "report"]);
+const VALID_VIEWS = new Set(["landing", "auth", "admin", "cloud_setup", "signer", "report"]);
 
 function createRouteState({
   index = 0,
@@ -37,6 +38,7 @@ function createRouteState({
   activeSessionId = null,
   reportSessionId = null,
   directEntry = false,
+  schoolId = null,
 }) {
   const safeView = VALID_VIEWS.has(view) ? view : "landing";
 
@@ -46,7 +48,8 @@ function createRouteState({
     view: safeView,
     activeSessionId: safeView === "signer" ? activeSessionId || null : null,
     reportSessionId: safeView === "report" ? reportSessionId || null : null,
-    directEntry: Boolean(safeView === "signer" && activeSessionId && directEntry),
+    schoolId: safeView === "signer" ? schoolId || null : null,
+    directEntry: Boolean(safeView === "signer" && (activeSessionId || schoolId) && directEntry),
   };
 }
 
@@ -57,26 +60,32 @@ function buildBaseUrl() {
   return url.toString();
 }
 
-function buildRouteUrl(routeState, cloudConfig) {
+function buildRouteUrl(routeState, config) {
   const url = new URL(buildBaseUrl());
 
-  if (routeState.view === "signer" && routeState.activeSessionId) {
-    url.searchParams.set("sessionId", routeState.activeSessionId);
+  if (routeState.view === "signer") {
+    if (routeState.activeSessionId) {
+      url.searchParams.set("sessionId", routeState.activeSessionId);
+    }
 
-    if (cloudConfig.enabled && cloudConfig.scriptUrl) {
-      url.searchParams.set("endpoint", cloudConfig.scriptUrl);
+    if (routeState.schoolId) {
+      url.searchParams.set("schoolId", routeState.schoolId);
+    } else if (routeState.activeSessionId && config?.enabled && config.scriptUrl) {
+      url.searchParams.set("endpoint", config.scriptUrl);
     }
   }
 
   return url.toString();
 }
 
-function buildShareUrl(sessionId, cloudConfig) {
+function buildShareUrl(sessionId, schoolId, config) {
   const url = new URL(buildBaseUrl());
   url.searchParams.set("sessionId", sessionId);
 
-  if (cloudConfig.enabled && cloudConfig.scriptUrl) {
-    url.searchParams.set("endpoint", cloudConfig.scriptUrl);
+  if (schoolId) {
+    url.searchParams.set("schoolId", schoolId);
+  } else if (config?.enabled && config.scriptUrl) {
+    url.searchParams.set("endpoint", config.scriptUrl);
   }
 
   return url.toString();
@@ -86,27 +95,32 @@ function getInitialSessionId() {
   return new URLSearchParams(window.location.search).get("sessionId");
 }
 
-function getInitialCloudConfig() {
-  const params = new URLSearchParams(window.location.search);
-  const endpoint = params.get("endpoint");
+function getInitialSchoolId() {
+  return new URLSearchParams(window.location.search).get("schoolId");
+}
 
-  if (endpoint) {
-    return {
-      enabled: true,
-      scriptUrl: endpoint,
-    };
+function getInitialLegacyCloudConfig() {
+  const endpoint = new URLSearchParams(window.location.search).get("endpoint");
+
+  if (!endpoint) {
+    return DEFAULT_CLOUD_CONFIG;
   }
 
-  return readCloudConfig();
+  return {
+    enabled: true,
+    scriptUrl: endpoint,
+  };
 }
 
 function readUrlRouteState() {
   const sessionId = getInitialSessionId();
+  const schoolId = getInitialSchoolId();
 
   return createRouteState({
-    view: sessionId ? "signer" : "landing",
+    view: sessionId || schoolId ? "signer" : "landing",
     activeSessionId: sessionId,
-    directEntry: Boolean(sessionId),
+    schoolId,
+    directEntry: Boolean(sessionId || schoolId),
   });
 }
 
@@ -121,11 +135,27 @@ function readHistoryRouteState(historyState) {
     activeSessionId: historyState.activeSessionId,
     reportSessionId: historyState.reportSessionId,
     directEntry: historyState.directEntry,
+    schoolId: historyState.schoolId,
   });
 }
 
 function getInitialRouteState() {
   return readHistoryRouteState(window.history.state) || readUrlRouteState();
+}
+
+function buildCloudConfig(scriptUrl) {
+  if (!scriptUrl) {
+    return DEFAULT_CLOUD_CONFIG;
+  }
+
+  try {
+    return {
+      enabled: true,
+      scriptUrl: validateScriptUrl(scriptUrl),
+    };
+  } catch {
+    return DEFAULT_CLOUD_CONFIG;
+  }
 }
 
 function normalizeSignaturePayload(participant, dataUrl) {
@@ -140,25 +170,49 @@ function normalizeSignaturePayload(participant, dataUrl) {
 }
 
 export default function App() {
-  const initialCloudConfigRef = useRef(getInitialCloudConfig());
+  const initialLegacyCloudConfigRef = useRef(getInitialLegacyCloudConfig());
   const initialRouteRef = useRef(getInitialRouteState());
   const [view, setView] = useState(initialRouteRef.current.view);
   const [sessions, setSessions] = useState([]);
-  const [staffList, setStaffList] = useState(() => readStaffList());
-  const [lastSchoolName, setLastSchoolName] = useState(() => readLastSchool());
-  const [cloudConfig, setCloudConfig] = useState(initialCloudConfigRef.current);
-  const [googleClientId, setGoogleClientId] = useState(() => readGoogleClientId());
+  const [staffList, setStaffList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
   const [toast, setToast] = useState(null);
   const [activeSessionId, setActiveSessionId] = useState(initialRouteRef.current.activeSessionId);
   const [reportSessionId, setReportSessionId] = useState(initialRouteRef.current.reportSessionId);
   const [shareSessionId, setShareSessionId] = useState(null);
   const [signatureRequest, setSignatureRequest] = useState(null);
-  const directEntryRef = useRef(initialRouteRef.current.directEntry);
+  const [routeSchoolId, setRouteSchoolId] = useState(initialRouteRef.current.schoolId);
+  const [directEntry, setDirectEntry] = useState(initialRouteRef.current.directEntry);
+  const [authIntent, setAuthIntent] = useState("admin");
+  const [authReady, setAuthReady] = useState(!hasFirebaseConfig);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [adminProfile, setAdminProfile] = useState(null);
+  const [adminProfileLoading, setAdminProfileLoading] = useState(false);
+  const [adminSchoolConfig, setAdminSchoolConfig] = useState(null);
+  const [adminSchoolLoading, setAdminSchoolLoading] = useState(false);
+  const [routeSchoolConfig, setRouteSchoolConfig] = useState(null);
+  const [routeSchoolLoading, setRouteSchoolLoading] = useState(false);
   const historyIndexRef = useRef(initialRouteRef.current.index);
-  const cloudConfigRef = useRef(initialCloudConfigRef.current);
+  const activeCloudConfigRef = useRef(initialLegacyCloudConfigRef.current);
 
+  const activeAdminSchoolId = adminProfile?.schoolId || null;
+  const currentSchoolName = adminSchoolConfig?.schoolName || adminProfile?.schoolName || "";
+  const currentUserLabel = currentUser?.displayName || currentUser?.email || "관리자";
+  const adminCloudConfig = useMemo(
+    () => buildCloudConfig(adminSchoolConfig?.gasWebAppUrl),
+    [adminSchoolConfig?.gasWebAppUrl],
+  );
+  const routeCloudConfig = useMemo(() => {
+    if (routeSchoolConfig?.gasWebAppUrl) {
+      return buildCloudConfig(routeSchoolConfig.gasWebAppUrl);
+    }
+
+    return initialLegacyCloudConfigRef.current;
+  }, [routeSchoolConfig?.gasWebAppUrl]);
+  const shouldUseRouteConfig = view === "signer" && (Boolean(routeSchoolId) || directEntry || routeCloudConfig.enabled);
+  const activeCloudConfig = shouldUseRouteConfig ? routeCloudConfig : adminCloudConfig;
   const activeSession = useMemo(
     () => sessions.find((item) => item.id === activeSessionId) || null,
     [activeSessionId, sessions],
@@ -173,17 +227,18 @@ export default function App() {
   );
 
   function applyRouteState(routeState) {
-    directEntryRef.current = routeState.directEntry;
     historyIndexRef.current = routeState.index;
     setView(routeState.view);
     setActiveSessionId(routeState.activeSessionId);
     setReportSessionId(routeState.reportSessionId);
+    setRouteSchoolId(routeState.schoolId);
+    setDirectEntry(routeState.directEntry);
     setShareSessionId(null);
     setSignatureRequest(null);
   }
 
   function writeRouteState(routeState, options = {}) {
-    const { replace = false, config = cloudConfigRef.current } = options;
+    const { replace = false, config = activeCloudConfigRef.current } = options;
     const method = replace ? "replaceState" : "pushState";
     historyIndexRef.current = routeState.index;
     window.history[method](routeState, "", buildRouteUrl(routeState, config));
@@ -220,12 +275,32 @@ export default function App() {
     });
   }
 
-  async function refreshSessions(nextConfig = cloudConfig, options = {}) {
+  function getAdminWritableConfig() {
+    if (!adminCloudConfig.enabled || !adminCloudConfig.scriptUrl) {
+      notify("학교 Apps Script 주소를 먼저 설정해 주세요.", "error");
+      return null;
+    }
+
+    return adminCloudConfig;
+  }
+
+  async function refreshSessions(nextConfig = activeCloudConfig, options = {}) {
     const { silent = false } = options;
+
+    if (!nextConfig?.enabled || !nextConfig.scriptUrl) {
+      startTransition(() => {
+        setSessions([]);
+      });
+      setLoading(false);
+      setBusy(false);
+      return [];
+    }
 
     if (!silent) {
       setBusy(true);
     }
+
+    setLoading(true);
 
     try {
       const nextSessions = await listSessions(nextConfig);
@@ -242,18 +317,122 @@ export default function App() {
     }
   }
 
+  async function runAuthAction(action, successMessage) {
+    setAuthBusy(true);
+
+    try {
+      const user = await action();
+      setCurrentUser(user);
+      notify(successMessage);
+
+      if (authIntent === "cloud_setup") {
+        transitionTo({ view: "cloud_setup" });
+        return;
+      }
+
+      transitionTo({ view: "admin" });
+    } catch (error) {
+      notify(error.message || "인증 처리에 실패했습니다.", "error");
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
   useEffect(() => {
-    refreshSessions(cloudConfig, { silent: true });
+    activeCloudConfigRef.current = activeCloudConfig;
+  }, [activeCloudConfig]);
+
+  useEffect(() => {
+    if (!hasFirebaseConfig) {
+      setAuthReady(true);
+      return undefined;
+    }
+
+    return subscribeToAuthState((user) => {
+      setCurrentUser(user);
+      setAuthReady(true);
+    });
   }, []);
 
   useEffect(() => {
-    cloudConfigRef.current = cloudConfig;
-  }, [cloudConfig]);
+    if (!currentUser) {
+      setAdminProfile(null);
+      setAdminProfileLoading(false);
+      return undefined;
+    }
+
+    setAdminProfileLoading(true);
+
+    return subscribeToAdminProfile(currentUser.uid, (profile) => {
+      setAdminProfile(profile);
+      setAdminProfileLoading(false);
+    });
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!adminProfile?.schoolId) {
+      setAdminSchoolConfig(null);
+      setAdminSchoolLoading(false);
+      setStaffList([]);
+      return undefined;
+    }
+
+    setAdminSchoolLoading(true);
+
+    return subscribeToSchoolConfig(
+      adminProfile.schoolId,
+      (config) => {
+        setAdminSchoolConfig(config);
+        setStaffList(config?.defaultStaffCache || []);
+        setAdminSchoolLoading(false);
+      },
+      { includePrivate: true },
+    );
+  }, [adminProfile?.schoolId]);
+
+  useEffect(() => {
+    if (!routeSchoolId) {
+      setRouteSchoolConfig(null);
+      setRouteSchoolLoading(false);
+      return undefined;
+    }
+
+    if (routeSchoolId === adminProfile?.schoolId && adminSchoolConfig) {
+      setRouteSchoolConfig(adminSchoolConfig);
+      setRouteSchoolLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setRouteSchoolLoading(true);
+
+    readSchoolConfigById(routeSchoolId, { includePrivate: false })
+      .then((config) => {
+        if (!cancelled) {
+          setRouteSchoolConfig(config);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setRouteSchoolConfig(null);
+          notify(error.message || "학교 설정을 불러오지 못했습니다.", "error");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRouteSchoolLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [adminProfile?.schoolId, adminSchoolConfig, routeSchoolId]);
 
   useEffect(() => {
     writeRouteState(initialRouteRef.current, {
       replace: true,
-      config: initialCloudConfigRef.current,
+      config: activeCloudConfigRef.current,
     });
 
     function handlePopState(event) {
@@ -288,11 +467,12 @@ export default function App() {
         view,
         activeSessionId,
         reportSessionId,
-        directEntry: directEntryRef.current,
+        directEntry,
+        schoolId: routeSchoolId,
       }),
-      { replace: true, config: cloudConfig },
+      { replace: true, config: activeCloudConfig },
     );
-  }, [activeSessionId, cloudConfig, reportSessionId, view]);
+  }, [activeCloudConfig, activeSessionId, directEntry, reportSessionId, routeSchoolId, view]);
 
   useEffect(() => {
     if (reportSession) {
@@ -308,7 +488,104 @@ export default function App() {
     document.title = APP_NAME;
   }, [activeSession, reportSession]);
 
+  useEffect(() => {
+    if (!authReady) {
+      return undefined;
+    }
+
+    if ((view === "admin" || view === "cloud_setup") && !currentUser) {
+      setAuthIntent(view === "cloud_setup" ? "cloud_setup" : "admin");
+      transitionTo({ view: "auth" }, { replace: true });
+      return undefined;
+    }
+
+    return undefined;
+  }, [authReady, currentUser, view]);
+
+  useEffect(() => {
+    if (view !== "admin" || !currentUser || adminProfileLoading || adminSchoolLoading) {
+      return;
+    }
+
+    if (!adminCloudConfig.enabled) {
+      transitionTo({ view: "cloud_setup" }, { replace: true });
+    }
+  }, [adminCloudConfig.enabled, adminProfileLoading, adminSchoolLoading, currentUser, view]);
+
+  useEffect(() => {
+    if (!authReady) {
+      return undefined;
+    }
+
+    if (!shouldUseRouteConfig && currentUser && (adminProfileLoading || adminSchoolLoading)) {
+      return undefined;
+    }
+
+    if (shouldUseRouteConfig && routeSchoolLoading) {
+      return undefined;
+    }
+
+    const canLoadAdminData = !shouldUseRouteConfig && currentUser;
+    const canLoadSignerData = shouldUseRouteConfig;
+
+    if (!canLoadAdminData && !canLoadSignerData) {
+      startTransition(() => {
+        setSessions([]);
+      });
+      setLoading(false);
+      return undefined;
+    }
+
+    if (!activeCloudConfig.enabled || !activeCloudConfig.scriptUrl) {
+      startTransition(() => {
+        setSessions([]);
+      });
+      setLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+
+    listSessions(activeCloudConfig)
+      .then((nextSessions) => {
+        if (!cancelled) {
+          startTransition(() => {
+            setSessions(nextSessions);
+          });
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          notify(error.message || "데이터를 불러오지 못했습니다.", "error");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeCloudConfig,
+    adminProfileLoading,
+    adminSchoolLoading,
+    authReady,
+    currentUser,
+    routeSchoolLoading,
+    shouldUseRouteConfig,
+  ]);
+
   async function handleCreateSession(payload) {
+    const config = getAdminWritableConfig();
+
+    if (!config) {
+      return false;
+    }
+
     const session = {
       id: createId(),
       type: payload.type,
@@ -326,21 +603,15 @@ export default function App() {
     setBusy(true);
 
     try {
-      const nextSessions = await upsertSession(cloudConfig, session);
+      const nextSessions = await upsertSession(config, session);
 
       if (nextSessions) {
         setSessions(nextSessions);
       } else {
-        await refreshSessions(cloudConfig, { silent: true });
+        await refreshSessions(config, { silent: true });
       }
 
-      writeLastSchool(payload.schoolName);
-      setLastSchoolName(payload.schoolName);
-      notify(
-        cloudConfig.enabled
-          ? "연수가 구글 드라이브에 저장되었습니다."
-          : "연수가 로컬 저장소에 저장되었습니다.",
-      );
+      notify("연수가 학교 GAS 저장소에 저장되었습니다.");
       return true;
     } catch (error) {
       notify(error.message || "연수 등록에 실패했습니다.", "error");
@@ -350,23 +621,55 @@ export default function App() {
     }
   }
 
-  function handleUpdateDefaultStaffList(list) {
-    writeStaffList(list);
-    setStaffList(list);
-    notify(`기본 명단 ${list.length}명이 등록되었습니다.`);
-  }
-
-  function handleClearDefaultStaffList() {
-    if (!window.confirm("모든 교직원 명단을 삭제하시겠습니까?")) {
+  async function handleUpdateDefaultStaffList(list) {
+    if (!activeAdminSchoolId) {
+      notify("학교 정보가 없어 기본 명단을 저장할 수 없습니다.", "error");
       return;
     }
 
-    writeStaffList([]);
-    setStaffList([]);
-    notify("교직원 명단이 초기화되었습니다.");
+    setBusy(true);
+
+    try {
+      await saveDefaultStaffCache(activeAdminSchoolId, list);
+      setStaffList(list);
+      notify(`기본 명단 ${list.length}명이 저장되었습니다.`);
+    } catch (error) {
+      notify(error.message || "기본 명단 저장에 실패했습니다.", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleClearDefaultStaffList() {
+    if (!activeAdminSchoolId) {
+      notify("학교 정보가 없어 기본 명단을 초기화할 수 없습니다.", "error");
+      return;
+    }
+
+    if (!window.confirm("모든 기본 교직원 명단을 삭제하시겠습니까?")) {
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      await saveDefaultStaffCache(activeAdminSchoolId, []);
+      setStaffList([]);
+      notify("기본 교직원 명단이 초기화되었습니다.");
+    } catch (error) {
+      notify(error.message || "기본 명단 초기화에 실패했습니다.", "error");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleReplaceSessionStaffList(sessionId, nextStaffList) {
+    const config = getAdminWritableConfig();
+
+    if (!config) {
+      return;
+    }
+
     const session = sessions.find((item) => item.id === sessionId);
 
     if (!session) {
@@ -386,8 +689,7 @@ export default function App() {
         continue;
       }
 
-      const exists = mergedStaff.some((item) => item.id === candidate.id);
-      if (!exists) {
+      if (!mergedStaff.some((item) => item.id === candidate.id)) {
         mergedStaff.push(candidate);
       }
     }
@@ -395,7 +697,7 @@ export default function App() {
     setBusy(true);
 
     try {
-      const nextSessions = await upsertSession(cloudConfig, {
+      const nextSessions = await upsertSession(config, {
         ...session,
         staffList: mergedStaff,
       });
@@ -403,7 +705,7 @@ export default function App() {
       if (nextSessions) {
         setSessions(nextSessions);
       } else {
-        await refreshSessions(cloudConfig, { silent: true });
+        await refreshSessions(config, { silent: true });
       }
 
       notify(`연수 명단이 업데이트되었습니다. (총 ${mergedStaff.length}명 등록)`);
@@ -415,6 +717,12 @@ export default function App() {
   }
 
   async function handleUpdateSession(sessionId, payload) {
+    const config = getAdminWritableConfig();
+
+    if (!config) {
+      return false;
+    }
+
     const session = sessions.find((item) => item.id === sessionId);
 
     if (!session) {
@@ -433,16 +741,14 @@ export default function App() {
         time: payload.time,
         title: payload.title,
       };
-      const nextSessions = await upsertSession(cloudConfig, nextSession);
+      const nextSessions = await upsertSession(config, nextSession);
 
       if (nextSessions) {
         setSessions(nextSessions);
       } else {
-        await refreshSessions(cloudConfig, { silent: true });
+        await refreshSessions(config, { silent: true });
       }
 
-      writeLastSchool(payload.schoolName);
-      setLastSchoolName(payload.schoolName);
       notify("연수 정보가 수정되었습니다.");
       return true;
     } catch (error) {
@@ -454,6 +760,12 @@ export default function App() {
   }
 
   async function handleDeleteSession(sessionId) {
+    const config = getAdminWritableConfig();
+
+    if (!config) {
+      return;
+    }
+
     if (!window.confirm("이 연수를 삭제하시겠습니까? 서명 데이터도 함께 삭제됩니다.")) {
       return;
     }
@@ -461,12 +773,12 @@ export default function App() {
     setBusy(true);
 
     try {
-      const nextSessions = await deleteSession(cloudConfig, sessionId);
+      const nextSessions = await deleteSession(config, sessionId);
 
       if (nextSessions) {
         setSessions(nextSessions);
       } else {
-        await refreshSessions(cloudConfig, { silent: true });
+        await refreshSessions(config, { silent: true });
       }
 
       if (activeSessionId === sessionId) {
@@ -482,34 +794,72 @@ export default function App() {
   }
 
   async function handleSaveCloudConfig(nextConfig) {
-    let config;
-
-    try {
-      config = nextConfig.enabled
-        ? {
-          enabled: true,
-          scriptUrl: validateScriptUrl(nextConfig.scriptUrl),
-        }
-        : DEFAULT_CLOUD_CONFIG;
-    } catch (error) {
-      notify(error.message || "클라우드 URL을 다시 확인해 주세요.", "error");
+    if (!activeAdminSchoolId || !currentUser) {
+      notify("학교 설정을 저장할 관리자를 찾지 못했습니다.", "error");
       return;
     }
 
-    writeCloudConfig(config);
-    writeGoogleClientId(nextConfig.googleClientId || "");
-    setCloudConfig(config);
-    setGoogleClientId(nextConfig.googleClientId || "");
+    let config = DEFAULT_CLOUD_CONFIG;
 
-    await refreshSessions(config, { silent: true });
-    transitionTo({ view: "admin" }, { config });
-    notify(config.enabled ? "구글 연동 설정이 저장되었습니다." : "로컬 모드로 전환되었습니다.");
+    if (nextConfig.enabled) {
+      try {
+        config = {
+          enabled: true,
+          scriptUrl: validateScriptUrl(nextConfig.scriptUrl),
+        };
+      } catch (error) {
+        notify(error.message || "학교 URL을 다시 확인해 주세요.", "error");
+        return;
+      }
+    }
+
+    setBusy(true);
+
+    try {
+      await Promise.all([
+        saveSchoolConfig(activeAdminSchoolId, {
+          gasWebAppUrl: config.scriptUrl,
+          schoolName: currentSchoolName || adminProfile?.schoolName || "",
+        }),
+        updateAdminStatus(currentUser.uid, config.enabled ? "active" : "pending_setup"),
+      ]);
+
+      if (config.enabled) {
+        await refreshSessions(config, { silent: true });
+        transitionTo({ view: "admin" }, { config });
+        notify("학교 GAS 설정이 저장되었습니다.");
+        return;
+      }
+
+      setSessions([]);
+      transitionTo({ view: "cloud_setup" }, { config: DEFAULT_CLOUD_CONFIG });
+      notify("학교 GAS 설정이 해제되었습니다.");
+    } catch (error) {
+      notify(error.message || "학교 설정 저장에 실패했습니다.", "error");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  async function handleStartCloudFlow() {
-    if (cloudConfig.enabled && cloudConfig.scriptUrl) {
-      await refreshSessions(cloudConfig);
-      notify("클라우드 데이터를 새로 불러왔습니다.");
+  function openAdminExperience() {
+    if (!currentUser) {
+      setAuthIntent("admin");
+      transitionTo({ view: "auth" });
+      return;
+    }
+
+    if (!adminCloudConfig.enabled) {
+      transitionTo({ view: "cloud_setup" });
+      return;
+    }
+
+    transitionTo({ view: "admin" });
+  }
+
+  function openSchoolSettings() {
+    if (!currentUser) {
+      setAuthIntent("cloud_setup");
+      transitionTo({ view: "auth" });
       return;
     }
 
@@ -521,6 +871,7 @@ export default function App() {
       view: "signer",
       activeSessionId: null,
       directEntry: false,
+      schoolId: activeAdminSchoolId || routeSchoolId || null,
     });
   }
 
@@ -529,6 +880,7 @@ export default function App() {
       view: "signer",
       activeSessionId: sessionId,
       directEntry: false,
+      schoolId: routeSchoolId || activeAdminSchoolId || null,
     });
   }
 
@@ -537,6 +889,7 @@ export default function App() {
       view: "signer",
       activeSessionId: null,
       directEntry: false,
+      schoolId: routeSchoolId || activeAdminSchoolId || null,
     });
   }
 
@@ -556,7 +909,7 @@ export default function App() {
       return;
     }
 
-    await navigator.clipboard.writeText(buildShareUrl(shareSession.id, cloudConfig));
+    await navigator.clipboard.writeText(buildShareUrl(shareSession.id, activeAdminSchoolId, adminCloudConfig));
     notify("링크가 복사되었습니다.");
   }
 
@@ -579,17 +932,22 @@ export default function App() {
       return;
     }
 
+    if (!activeCloudConfig.enabled || !activeCloudConfig.scriptUrl) {
+      notify("학교 설정이 없어 서명을 저장할 수 없습니다.", "error");
+      return;
+    }
+
     const signature = normalizeSignaturePayload(signatureRequest.participant, dataUrl);
 
     setBusy(true);
 
     try {
-      const nextSessions = await addSignatureBatch(cloudConfig, [session.id], signature);
+      const nextSessions = await addSignatureBatch(activeCloudConfig, [session.id], signature);
 
       if (nextSessions) {
         setSessions(nextSessions);
       } else {
-        await refreshSessions(cloudConfig, { silent: true });
+        await refreshSessions(activeCloudConfig, { silent: true });
       }
 
       notify(`${signature.staffName}님의 서명이 저장되었습니다.`);
@@ -604,7 +962,7 @@ export default function App() {
   async function handleDeleteSignature(sessionId, staffId) {
     const session = sessions.find((item) => item.id === sessionId);
 
-    if (!session) {
+    if (!session || !adminCloudConfig.enabled || !adminCloudConfig.scriptUrl) {
       return;
     }
 
@@ -615,12 +973,12 @@ export default function App() {
     setBusy(true);
 
     try {
-      const nextSessions = await removeSignatureBatch(cloudConfig, [session.id], staffId);
+      const nextSessions = await removeSignatureBatch(adminCloudConfig, [session.id], staffId);
 
       if (nextSessions) {
         setSessions(nextSessions);
       } else {
-        await refreshSessions(cloudConfig, { silent: true });
+        await refreshSessions(adminCloudConfig, { silent: true });
       }
 
       notify("서명이 삭제되었습니다.");
@@ -631,9 +989,34 @@ export default function App() {
     }
   }
 
-  const shareUrl = shareSession ? buildShareUrl(shareSession.id, cloudConfig) : "";
+  async function handleLogout() {
+    if (!hasFirebaseConfig) {
+      return;
+    }
 
-  if (loading) {
+    setAuthBusy(true);
+
+    try {
+      await signOutAdmin();
+      setCurrentUser(null);
+      transitionTo({ view: "landing" }, { replace: true });
+      notify("로그아웃되었습니다.");
+    } catch (error) {
+      notify(error.message || "로그아웃에 실패했습니다.", "error");
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  const shareUrl = shareSession
+    ? buildShareUrl(shareSession.id, activeAdminSchoolId, adminCloudConfig)
+    : "";
+  const screenLoading =
+    !authReady ||
+    ((view === "admin" || view === "cloud_setup") && currentUser && (adminProfileLoading || adminSchoolLoading)) ||
+    (view === "signer" && routeSchoolId && routeSchoolLoading && sessions.length === 0);
+
+  if (screenLoading) {
     return (
       <div className="loading-shell">
         <div className="loading-spinner" />
@@ -646,30 +1029,61 @@ export default function App() {
     <>
       {view === "landing" ? (
         <LandingView
-          cloudEnabled={cloudConfig.enabled}
-          onOpenAdmin={() => transitionTo({ view: "admin" })}
-          onOpenCloud={handleStartCloudFlow}
+          cloudEnabled={adminCloudConfig.enabled}
+          currentSchoolName={currentSchoolName}
+          currentUserLabel={currentUserLabel}
+          isSignedIn={Boolean(currentUser)}
+          onOpenAdmin={openAdminExperience}
+          onOpenCloud={openSchoolSettings}
           onOpenSigner={openSignerHome}
+          onSignOut={handleLogout}
+        />
+      ) : null}
+
+      {view === "auth" ? (
+        <AuthView
+          authBusy={authBusy}
+          intent={authIntent}
+          onBack={() => goBack({ view: "landing" })}
+          onEmailLogin={(payload) =>
+            runAuthAction(() => signInWithEmail(payload), "관리자 로그인이 완료되었습니다.")
+          }
+          onEmailSignup={(payload) =>
+            runAuthAction(() => signUpWithEmail(payload), "관리자 가입이 완료되었습니다.")
+          }
+          onGoogleLogin={() =>
+            runAuthAction(() => signInWithGoogle({ mode: "login" }), "Google 로그인이 완료되었습니다.")
+          }
+          onGoogleSignup={(school) =>
+            runAuthAction(
+              () => signInWithGoogle({ mode: "signup", school }),
+              "Google 계정으로 관리자 가입이 완료되었습니다.",
+            )
+          }
         />
       ) : null}
 
       {view === "admin" ? (
         <AdminView
+          adminEmail={currentUser?.email || ""}
+          adminName={currentUser?.displayName || ""}
           busy={busy}
-          cloudEnabled={cloudConfig.enabled}
-          initialSchoolName={lastSchoolName}
+          cloudEnabled={adminCloudConfig.enabled}
+          initialSchoolName={currentSchoolName}
           notify={notify}
-          onBack={() => goBack({ view: "landing" })}
+          onBack={() => transitionTo({ view: "landing" })}
           onClearDefaultStaffList={handleClearDefaultStaffList}
           onCreateSession={handleCreateSession}
           onDeleteSession={handleDeleteSession}
-          onOpenCloud={() => transitionTo({ view: "cloud_setup" })}
+          onOpenCloud={openSchoolSettings}
           onOpenReport={openReport}
           onOpenShare={openShare}
-          onRefresh={() => refreshSessions(cloudConfig)}
+          onRefresh={() => refreshSessions(adminCloudConfig)}
           onReplaceSessionStaffList={handleReplaceSessionStaffList}
+          onSignOut={handleLogout}
           onUpdateSession={handleUpdateSession}
           onUpdateDefaultStaffList={handleUpdateDefaultStaffList}
+          schoolName={currentSchoolName}
           sessions={sessions}
           staffList={staffList}
         />
@@ -677,20 +1091,21 @@ export default function App() {
 
       {view === "cloud_setup" ? (
         <CloudSetupView
+          adminEmail={currentUser?.email || ""}
           busy={busy}
-          currentConfig={cloudConfig}
-          googleClientId={googleClientId}
-          onBack={() => goBack({ view: "admin" })}
+          currentConfig={adminCloudConfig}
+          onBack={() => goBack({ view: currentUser ? "admin" : "landing" })}
           onSave={handleSaveCloudConfig}
           onTest={testScriptUrl}
+          schoolName={currentSchoolName}
         />
       ) : null}
 
       {view === "signer" ? (
         <SignerView
           activeSessionId={activeSessionId}
-          busy={busy}
-          directEntry={directEntryRef.current}
+          busy={busy || loading}
+          directEntry={directEntry}
           onClearSelection={clearSignerSelection}
           onRequestSignature={handleRequestSignature}
           onSelectSession={openSignerSession}

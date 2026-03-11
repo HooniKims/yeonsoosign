@@ -192,6 +192,30 @@ a {
   margin-top: 34px;
 }
 
+.identity-card {
+  display: grid;
+  gap: 4px;
+  margin-top: 22px;
+  padding: 16px 18px;
+  border: 1px solid rgba(66, 104, 255, 0.12);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(235, 242, 255, 0.92), rgba(255, 255, 255, 0.96));
+  color: #33405f;
+}
+
+.identity-card strong {
+  font-size: 15px;
+}
+
+.identity-card span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.landing-inline-action {
+  width: 100%;
+}
+
 .action-button,
 .ghost-button,
 .mini-button,
@@ -359,6 +383,66 @@ a {
 
 .cloud-shell {
   padding-top: 24px;
+}
+
+.auth-shell {
+  display: grid;
+  place-items: center;
+}
+
+.auth-card {
+  display: grid;
+  gap: 18px;
+}
+
+.auth-copy h1 {
+  margin: 10px 0 0;
+  font-size: clamp(30px, 4vw, 42px);
+}
+
+.auth-segment {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 4px;
+  border-radius: 18px;
+  background: #eef2ff;
+}
+
+.auth-segment-button {
+  min-height: 46px;
+  border-radius: 14px;
+  background: transparent;
+  color: #66718a;
+  font-weight: 800;
+}
+
+.auth-segment-button.is-active {
+  background: #fff;
+  color: var(--primary);
+  box-shadow: 0 8px 24px rgba(44, 73, 164, 0.08);
+}
+
+.auth-divider {
+  position: relative;
+  text-align: center;
+  color: var(--muted-soft);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-divider::before {
+  content: "";
+  position: absolute;
+  inset: 50% 0 auto;
+  border-top: 1px solid rgba(93, 112, 165, 0.16);
+}
+
+.auth-divider span {
+  position: relative;
+  padding: 0 10px;
+  background: #fff;
 }
 
 .cloud-layout {
@@ -572,6 +656,60 @@ a {
 .field {
   display: grid;
   gap: 8px;
+}
+
+.school-search-shell {
+  display: grid;
+  gap: 10px;
+}
+
+.school-search-results {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid rgba(73, 94, 147, 0.14);
+  border-radius: 18px;
+  background: #f8faff;
+}
+
+.school-result-button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid rgba(73, 94, 147, 0.12);
+  text-align: left;
+  color: var(--text);
+}
+
+.school-result-button span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.selected-school-chip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: #eef5ff;
+  border: 1px solid rgba(56, 132, 255, 0.18);
+}
+
+.selected-school-chip div {
+  display: grid;
+  gap: 4px;
+}
+
+.selected-school-chip span {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .field span,
