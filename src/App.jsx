@@ -7,6 +7,7 @@ import PrintPreview from "./components/PrintPreview";
 import ShareDialog from "./components/ShareDialog";
 import SignatureModal from "./components/SignatureModal";
 import SignerView from "./components/SignerView";
+import { deleteOwnAdminAccount } from "./lib/adminManagement";
 import { APP_NAME, DEFAULT_CLOUD_CONFIG } from "./lib/constants";
 import { signInWithEmail, signInWithGoogle, signOutAdmin, signUpWithEmail, subscribeToAuthState } from "./lib/auth";
 import { hasFirebaseConfig } from "./lib/firebase";
@@ -31,6 +32,7 @@ import { createId } from "./lib/storage";
 
 const HISTORY_MARKER = "yeonsoo-sign-route";
 const VALID_VIEWS = new Set(["landing", "auth", "admin", "cloud_setup", "signer", "report"]);
+const REPORT_REFRESH_INTERVAL_MS = 2500;
 
 function createRouteState({
   index = 0,
@@ -194,8 +196,10 @@ export default function App() {
   const [adminSchoolLoading, setAdminSchoolLoading] = useState(false);
   const [routeSchoolConfig, setRouteSchoolConfig] = useState(null);
   const [routeSchoolLoading, setRouteSchoolLoading] = useState(false);
+  const [signatureSaving, setSignatureSaving] = useState(false);
   const historyIndexRef = useRef(initialRouteRef.current.index);
   const activeCloudConfigRef = useRef(initialLegacyCloudConfigRef.current);
+  const reportSyncInFlightRef = useRef(false);
 
   const activeAdminSchoolId = adminProfile?.schoolId || null;
   const currentSchoolName = adminSchoolConfig?.schoolName || adminProfile?.schoolName || "";
@@ -292,7 +296,9 @@ export default function App() {
         setSessions([]);
       });
       setLoading(false);
-      setBusy(false);
+      if (!silent) {
+        setBusy(false);
+      }
       return [];
     }
 
@@ -313,7 +319,9 @@ export default function App() {
       return null;
     } finally {
       setLoading(false);
-      setBusy(false);
+      if (!silent) {
+        setBusy(false);
+      }
     }
   }
 
@@ -578,6 +586,38 @@ export default function App() {
     routeSchoolLoading,
     shouldUseRouteConfig,
   ]);
+
+  useEffect(() => {
+    if (view !== "report" || !reportSessionId || !adminCloudConfig.enabled || !adminCloudConfig.scriptUrl) {
+      reportSyncInFlightRef.current = false;
+      return undefined;
+    }
+
+    async function syncReport() {
+      if (reportSyncInFlightRef.current) {
+        return;
+      }
+
+      reportSyncInFlightRef.current = true;
+
+      try {
+        await refreshSessions(adminCloudConfig, { silent: true });
+      } finally {
+        reportSyncInFlightRef.current = false;
+      }
+    }
+
+    syncReport();
+
+    const intervalId = window.setInterval(syncReport, REPORT_REFRESH_INTERVAL_MS);
+    window.addEventListener("focus", syncReport);
+
+    return () => {
+      reportSyncInFlightRef.current = false;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", syncReport);
+    };
+  }, [adminCloudConfig, reportSessionId, view]);
 
   async function handleCreateSession(payload) {
     const config = getAdminWritableConfig();
@@ -893,7 +933,18 @@ export default function App() {
     });
   }
 
-  function openReport(sessionId) {
+  async function openReport(sessionId) {
+    let nextSessions = sessions;
+
+    if (adminCloudConfig.enabled && adminCloudConfig.scriptUrl) {
+      nextSessions = (await refreshSessions(adminCloudConfig)) || sessions;
+    }
+
+    if (!nextSessions.some((item) => item.id === sessionId)) {
+      notify("연수 정보를 다시 불러온 뒤에 출력해 주세요.", "error");
+      return;
+    }
+
     transitionTo({
       view: "report",
       reportSessionId: sessionId,
@@ -939,6 +990,7 @@ export default function App() {
 
     const signature = normalizeSignaturePayload(signatureRequest.participant, dataUrl);
 
+    setSignatureSaving(true);
     setBusy(true);
 
     try {
@@ -955,6 +1007,7 @@ export default function App() {
     } catch (error) {
       notify(error.message || "서명 저장에 실패했습니다.", "error");
     } finally {
+      setSignatureSaving(false);
       setBusy(false);
     }
   }
@@ -1005,6 +1058,36 @@ export default function App() {
       notify(error.message || "로그아웃에 실패했습니다.", "error");
     } finally {
       setAuthBusy(false);
+    }
+  }
+
+  async function handleDeleteOwnAccount() {
+    if (!currentUser) {
+      return;
+    }
+
+    if (!window.confirm("내 관리자 계정을 탈퇴하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) {
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      await deleteOwnAdminAccount();
+
+      try {
+        await signOutAdmin();
+      } catch {
+        // 서버에서 계정이 제거된 뒤에는 클라이언트 로그아웃이 실패할 수 있어 무시한다.
+      }
+
+      setCurrentUser(null);
+      transitionTo({ view: "landing" }, { replace: true });
+      notify("내 계정이 탈퇴 처리되었습니다.");
+    } catch (error) {
+      notify(error.message || "계정 탈퇴에 실패했습니다.", "error");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1075,6 +1158,7 @@ export default function App() {
           onClearDefaultStaffList={handleClearDefaultStaffList}
           onCreateSession={handleCreateSession}
           onDeleteSession={handleDeleteSession}
+          onDeleteOwnAccount={handleDeleteOwnAccount}
           onOpenCloud={openSchoolSettings}
           onOpenReport={openReport}
           onOpenShare={openShare}
@@ -1127,6 +1211,7 @@ export default function App() {
           onCancel={() => setSignatureRequest(null)}
           onSave={handleSaveSignature}
           participantName={signatureRequest.participant.name}
+          saving={signatureSaving}
           sessionTitle={activeSession?.title || "연수"}
         />
       ) : null}

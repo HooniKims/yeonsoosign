@@ -236,6 +236,7 @@
    - 다른 브라우저 로그인 시 동일 학교 설정 재사용
 3. 실제 Google Apps Script URL로 `엑셀 업로드 -> 연수 등록 -> QR 접속 -> 서명 -> 출력/PDF -> 삭제`까지 수동 E2E 확인
 4. 필요하면 다음 단계에서 `Firestore Rules`와 `Firebase 초기 설정 가이드`를 문서화하거나 `sessions` / `staff` / `auth` 로직 테스트를 추가
+5. 필요하면 다음 단계에서 관리자 수동 정리 절차를 별도 운영 문서로 정리
 
 ## 이번 후속 진행 내역
 - 저장소 기준 선반영 완료
@@ -245,8 +246,12 @@
   - 공개 학교 설정은 `schools/{schoolId}`, 관리자 전용 기본 명단은 `schoolPrivate/{schoolId}`로 분리
   - 공유 링크 진입 시에는 public-only 학교 설정만 읽도록 `src/lib/schools.js`, `src/App.jsx` 구조 조정
   - `schoolPrivate` 문서는 가입 시 자동 생성하지 않고, 관리자 명단 저장 시점에만 생성되도록 보안 정책 보강
+  - 본인 계정 탈퇴 기능 추가
+  - 최고 관리자 기능은 제거하고, 다른 관리자 계정 정리는 Firestore/Firebase Console 수동 관리 정책으로 유지
+  - `api/admins.js` + `firebase-admin` 기반 본인 계정 탈퇴 API 추가
   - `vitest` 기반 자동화 테스트 추가
     - `api/schools.test.js`
+    - `api/admins.test.js`
     - `src/lib/auth.test.js`
     - `src/lib/sessions.test.js`
     - `src/lib/staff.test.js`
@@ -259,3 +264,26 @@
 - 아직 외부에서 직접 해야 하는 작업
   - 실제 브라우저 수동 E2E
   - 실제 Google Apps Script 운영 URL 검증
+
+## 2026-03-11 추가 반영
+
+### 13. 결과 출력 실시간 반영, QR 다운로드, 서명 저장 로딩, 인쇄 미리보기 보강
+- 상태: 완료
+- 처리 내용:
+  1. `결과 출력` 버튼을 누를 때 최신 세션을 다시 불러오고, 출력 화면에서는 주기적으로 세션을 다시 읽어 서명이 새로고침 없이 반영되도록 조정
+  2. 공유 QR을 앱 내부에서 직접 생성하도록 변경하고, 다운로드 PNG 안에 `연수명`, `날짜` 문구를 함께 넣도록 구성
+  3. QR 다운로드 기본 파일명을 `날짜_연수명QR.png` 형식으로 지정
+  4. 서명 확인 버튼을 누른 뒤 저장 중 오버레이와 안내 문구를 보여 주고, 저장 중 중복 클릭을 막도록 처리
+  5. 브라우저 인쇄 미리보기에서 A4 폭/높이, 페이지 나눔, 셀 높이가 흔들리지 않도록 print CSS를 재정비
+- 관련 파일:
+  - `src/App.jsx`
+  - `src/components/ShareDialog.jsx`
+  - `src/components/SignatureModal.jsx`
+  - `src/lib/qr.js`
+  - `src/styles.css`
+  - `package.json`
+- 검증:
+  - `npm run build` 통과
+- 메모:
+  - QR 생성은 `qrcode` 패키지 기반으로 로컬 생성
+  - 실제 브라우저 인쇄 미리보기와 QR 다운로드 동작은 배포 후 한 번 더 수동 확인 권장

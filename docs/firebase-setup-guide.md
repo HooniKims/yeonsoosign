@@ -15,12 +15,18 @@ VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
 VITE_FIREBASE_MEASUREMENT_ID=
 VITE_SCHOOL_SEARCH_ENDPOINT=/api/schools
+VITE_ADMIN_API_ENDPOINT=/api/admins
 NEIS_API_KEY=
+FIREBASE_ADMIN_PROJECT_ID=
+FIREBASE_ADMIN_CLIENT_EMAIL=
+FIREBASE_ADMIN_PRIVATE_KEY=
 ```
 
 메모:
 - `VITE_*` 값은 브라우저 번들에 주입된다.
 - `NEIS_API_KEY`는 서버 함수 `api/schools.js`에서만 사용된다.
+- `FIREBASE_ADMIN_*`는 서버 함수 `api/admins.js`에서만 사용된다.
+- `FIREBASE_ADMIN_PRIVATE_KEY`는 줄바꿈을 포함한 키 원문을 넣거나 `\n` 이스케이프 문자열로 넣는다.
 - 운영/프리뷰 환경을 분리한다면 둘 다 동일하게 넣는다.
 
 ## 2. Firebase Console 설정

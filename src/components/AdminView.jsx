@@ -216,6 +216,7 @@ export default function AdminView({
   onBack,
   onClearDefaultStaffList,
   onCreateSession,
+  onDeleteOwnAccount,
   onDeleteSession,
   onOpenCloud,
   onOpenReport,
@@ -408,6 +409,29 @@ export default function AdminView({
             </div>
           </section>
         ) : null}
+
+        <section className="surface-card">
+          <div className="section-heading">
+            <div>
+              <h2>내 계정</h2>
+              <p className="micro-copy">현재 로그인한 관리자 계정의 탈퇴 기능입니다.</p>
+            </div>
+          </div>
+
+          <div className="account-panel">
+            <div className="account-summary-card">
+              <strong>{adminName || "관리자"}</strong>
+              <p>{adminEmail || "이메일 정보 없음"}</p>
+              <p className="micro-copy">{schoolName || "학교 미지정"}</p>
+            </div>
+
+            <div className="button-row button-row-end">
+              <button className="mini-button mini-button-danger" disabled={busy} onClick={onDeleteOwnAccount} type="button">
+                내 계정 탈퇴
+              </button>
+            </div>
+          </div>
+        </section>
 
         <section className="surface-card">
           <div className="section-heading">

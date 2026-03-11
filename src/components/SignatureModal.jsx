@@ -15,6 +15,7 @@ export default function SignatureModal({
   sessionTitle,
   onCancel,
   onSave,
+  saving = false,
 }) {
   const canvasRef = useRef(null);
   const dirtyRef = useRef(false);
@@ -38,6 +39,10 @@ export default function SignatureModal({
   }, []);
 
   function clearSignature() {
+    if (saving) {
+      return;
+    }
+
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
     context.clearRect(0, 0, canvas.width, canvas.height);
@@ -46,6 +51,10 @@ export default function SignatureModal({
   }
 
   function startDrawing(event) {
+    if (saving) {
+      return;
+    }
+
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
     const point = getPoint(event, canvas);
@@ -56,7 +65,7 @@ export default function SignatureModal({
   }
 
   function draw(event) {
-    if (!drawingRef.current) {
+    if (!drawingRef.current || saving) {
       return;
     }
 
@@ -81,15 +90,15 @@ export default function SignatureModal({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <div className="dialog-card dialog-card-signature">
+      <div className={`dialog-card dialog-card-signature ${saving ? "dialog-card-saving" : ""}`}>
         <div className="dialog-header dialog-header-center">
-          <p className="eyebrow">서명 대상 연수</p>
+          <p className="eyebrow">서명 등록 연수</p>
           <h3>{sessionTitle}</h3>
           <p className="signature-name">{participantName}님 서명</p>
-          <p className="signature-caption">칸에 맞추어 서명을 크게, 정자로 써주세요.</p>
+          <p className="signature-caption">칸에 맞춰 서명해 주세요. 확인 버튼을 누르면 바로 등록됩니다.</p>
         </div>
 
-        <div className="signature-pad">
+        <div className="signature-pad signature-pad-shell">
           <canvas
             ref={canvasRef}
             onMouseDown={startDrawing}
@@ -100,21 +109,34 @@ export default function SignatureModal({
             onTouchMove={draw}
             onTouchEnd={finishDrawing}
           />
+
+          {saving ? (
+            <div className="signature-saving-mask">
+              <div className="loading-spinner loading-spinner-small" />
+              <p>서명을 등록하는 중입니다.</p>
+            </div>
+          ) : null}
         </div>
 
+        {saving ? (
+          <p className="inline-feedback inline-feedback-loading signature-saving-feedback">
+            잠시만 기다려 주세요. 저장이 끝나면 창이 자동으로 닫힙니다.
+          </p>
+        ) : null}
+
         <div className="dialog-actions dialog-actions-split">
-          <button className="ghost-button" onClick={clearSignature}>
-            다시 쓰기
+          <button className="ghost-button" disabled={saving} onClick={clearSignature}>
+            다시 그리기
           </button>
-          <button className="ghost-button" onClick={onCancel}>
+          <button className="ghost-button" disabled={saving} onClick={onCancel}>
             취소
           </button>
           <button
             className="action-button action-button-primary"
-            disabled={!isDirty}
+            disabled={!isDirty || saving}
             onClick={() => onSave(canvasRef.current.toDataURL("image/png"))}
           >
-            서명 완료
+            {saving ? "등록 중..." : "서명 완료"}
           </button>
         </div>
       </div>
