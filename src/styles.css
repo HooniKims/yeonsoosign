@@ -1857,6 +1857,12 @@ a {
   }
 
   /* 인쇄 시 숨길 요소 */
+  /* Keep only the report tree in print to avoid fixed overlays leaking into later pages. */
+  body > :not(#root),
+  #root > :not(.report-shell) {
+    display: none !important;
+  }
+
   .no-print,
   .busy-overlay,
   .busy-note,
