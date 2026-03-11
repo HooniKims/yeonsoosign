@@ -287,3 +287,21 @@
 - 메모:
   - QR 생성은 `qrcode` 패키지 기반으로 로컬 생성
   - 실제 브라우저 인쇄 미리보기와 QR 다운로드 동작은 배포 후 한 번 더 수동 확인 권장
+
+### 14. 인쇄 미리보기 2페이지 상단 잔상 격리 패치
+- 상태: 완료
+- 처리 내용:
+  1. 인쇄 미리보기 2페이지 좌상단에 남던 빨간 조각은 `PrintPreview` 본문 데이터보다 보고서 외부 전역 레이어가 인쇄에 섞이는 쪽으로 원인 범위를 좁힘
+  2. `@media print`에서 이미 알고 있는 요소만 숨기던 방식 대신, `#root` 안에서 `.report-shell`만 남기고 나머지 형제 요소를 숨기도록 최소 범위 격리 규칙 추가
+  3. 보고서 내부 서명 이미지(`signature-preview`)나 표 본문은 건드리지 않고, 인쇄 시점에만 전역/fixed 오버레이 유입을 차단하도록 구성
+  4. 수정 전 원본은 `.codex-backups/20260311-164500/styles.css.pre-print-isolation.bak`로 로컬 백업 보관
+  5. 변경 사항을 `fix: isolate print output from overlays` 커밋으로 정리하고 `origin/main`에 푸시 완료
+- 관련 파일:
+  - `src/styles.css`
+  - `src/components/PrintPreview.jsx`
+  - `src/App.jsx`
+- 검증:
+  - `npm run build` 통과
+- 메모:
+  - 정확한 잔상 개체가 앱 토스트인지 브라우저/확장 주입 UI인지는 단정하지 않았고, 원인 범주를 “보고서 외부 오버레이 인쇄 혼입”으로 보고 안전하게 차단
+  - 백업 폴더는 Git에 올리지 않고 로컬 롤백 용도로만 유지
