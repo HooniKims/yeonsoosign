@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Yeonsoo sign favicon">
+  <rect width="64" height="64" rx="16" fill="#16324f" />
+  <rect x="12" y="10" width="40" height="44" rx="9" fill="#fff9f0" />
+  <rect x="24" y="14" width="16" height="4" rx="2" fill="#16324f" />
+  <path
+    d="M18 38c3.5-5 6.5 4 10.5-1.5S35 29 37 35.5 43 40 46 33"
+    fill="none"
+    stroke="#eb6a3d"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="4"
+  />
+  <path
+    d="M19 46h18"
+    fill="none"
+    stroke="#16324f"
+    stroke-linecap="round"
+    stroke-width="3"
+  />
+</svg>
