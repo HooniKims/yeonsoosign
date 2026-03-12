@@ -510,15 +510,10 @@ export default function App() {
     return undefined;
   }, [authReady, currentUser, view]);
 
-  useEffect(() => {
-    if (view !== "admin" || !currentUser || adminProfileLoading || adminSchoolLoading) {
-      return;
-    }
-
-    if (!adminCloudConfig.enabled) {
-      transitionTo({ view: "cloud_setup" }, { replace: true });
-    }
-  }, [adminCloudConfig.enabled, adminProfileLoading, adminSchoolLoading, currentUser, view]);
+  // NOTE: The previous auto-redirect from "admin" → "cloud_setup" when GAS was
+  // unconfigured was removed to prevent a navigation loop.  The initial redirect
+  // after login (runAuthAction) already shows cloud_setup on first login when
+  // GAS is not yet configured.
 
   useEffect(() => {
     if (!authReady) {
@@ -888,11 +883,6 @@ export default function App() {
       return;
     }
 
-    if (!adminCloudConfig.enabled) {
-      transitionTo({ view: "cloud_setup" });
-      return;
-    }
-
     transitionTo({ view: "admin" });
   }
 
@@ -1178,7 +1168,7 @@ export default function App() {
           adminEmail={currentUser?.email || ""}
           busy={busy}
           currentConfig={adminCloudConfig}
-          onBack={() => goBack({ view: currentUser ? "admin" : "landing" })}
+          onBack={() => transitionTo({ view: currentUser ? "admin" : "landing" })}
           onSave={handleSaveCloudConfig}
           onTest={testScriptUrl}
           schoolName={currentSchoolName}
