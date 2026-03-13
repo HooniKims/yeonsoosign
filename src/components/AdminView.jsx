@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { saveAs } from "file-saver";
-import { Building, Building2, Calendar, PenLine, RefreshCw, Settings } from "lucide-react";
+import { Building, Building2, Calendar, PenLine, RefreshCw, Settings, UserRound } from "lucide-react";
 import { buildStaffTemplateBlob, parseStaffFile, STAFF_TEMPLATE_FILE_NAME } from "../lib/staff";
 
 function buildSessionDraft(session) {
@@ -246,6 +246,8 @@ export default function AdminView({
     nextPassword: "",
     confirmPassword: "",
   });
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef(null);
   const baseUploadRef = useRef(null);
   const updateUploadRef = useRef(null);
   const updateTargetIdRef = useRef(null);
@@ -256,6 +258,32 @@ export default function AdminView({
       schoolName: current.schoolName || initialSchoolName,
     }));
   }, [initialSchoolName]);
+
+  useEffect(() => {
+    if (!isAccountMenuOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event) {
+      if (!accountMenuRef.current?.contains(event.target)) {
+        setIsAccountMenuOpen(false);
+      }
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setIsAccountMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isAccountMenuOpen]);
 
   const sessionSummary = useMemo(() => `${staffList.length}명 등록`, [staffList.length]);
 
@@ -327,6 +355,7 @@ export default function AdminView({
       nextPassword: "",
       confirmPassword: "",
     });
+    setIsAccountMenuOpen(false);
   }
 
   async function handleSubmit(event) {
@@ -385,6 +414,94 @@ export default function AdminView({
           <button className="mini-button mini-button-blue" onClick={onRefresh} type="button">
             <RefreshCw size={15} /> 새로고침
           </button>
+          <div className={`account-menu-shell ${isAccountMenuOpen ? "is-open" : ""}`} ref={accountMenuRef}>
+            <button
+              aria-expanded={isAccountMenuOpen}
+              aria-haspopup="dialog"
+              aria-label="내 계정 메뉴"
+              className="account-menu-trigger"
+              onClick={() => setIsAccountMenuOpen((current) => !current)}
+              type="button"
+            >
+              <UserRound size={18} strokeWidth={2} />
+            </button>
+
+            {isAccountMenuOpen ? (
+              <div aria-label="내 계정 메뉴" className="account-popover" role="dialog">
+                <div className="account-popover-header">
+                  <div>
+                    <p className="eyebrow">My Account</p>
+                    <h2>내 계정</h2>
+                  </div>
+                  <p className="micro-copy">비밀번호 변경과 탈퇴를 여기서 처리합니다.</p>
+                </div>
+
+                <div className="account-summary-card">
+                  <strong>{adminName || "관리자"}</strong>
+                  <p>{adminEmail || "이메일 정보 없음"}</p>
+                  <p className="micro-copy">{schoolName || "학교 미지정"}</p>
+                </div>
+
+                {canChangePassword ? (
+                  <form className="form-stack account-form-card" onSubmit={handlePasswordSubmit}>
+                    <div>
+                      <h3 className="account-card-title">비밀번호 변경</h3>
+                      <p className="micro-copy">현재 비밀번호를 다시 확인한 뒤 새 비밀번호로 변경합니다.</p>
+                    </div>
+
+                    <input
+                      autoComplete="current-password"
+                      className="text-input"
+                      onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
+                      placeholder="현재 비밀번호"
+                      type="password"
+                      value={passwordForm.currentPassword}
+                    />
+                    <input
+                      autoComplete="new-password"
+                      className="text-input"
+                      onChange={(event) => updatePasswordField("nextPassword", event.target.value)}
+                      placeholder="새 비밀번호"
+                      type="password"
+                      value={passwordForm.nextPassword}
+                    />
+                    <input
+                      autoComplete="new-password"
+                      className="text-input"
+                      onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
+                      placeholder="새 비밀번호 확인"
+                      type="password"
+                      value={passwordForm.confirmPassword}
+                    />
+
+                    <div className="button-row button-row-end">
+                      <button className="mini-button mini-button-blue" disabled={accountBusy} type="submit">
+                        비밀번호 변경
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <article className="notice-card notice-card-cool account-form-card">
+                    <h3 className="account-card-title">비밀번호 변경 불가</h3>
+                    <p>Google 로그인 전용 계정은 비밀번호 변경 대상이 아닙니다.</p>
+                  </article>
+                )}
+
+                <div className="account-danger-card">
+                  <div>
+                    <h3 className="account-card-title">계정 탈퇴</h3>
+                    <p className="micro-copy">탈퇴 시 Firebase 인증 계정과 관리자 문서가 함께 삭제됩니다.</p>
+                  </div>
+
+                  <div className="button-row button-row-end">
+                    <button className="mini-button mini-button-danger" disabled={accountBusy} onClick={onDeleteOwnAccount} type="button">
+                      내 계정 탈퇴
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
           <button className="mini-button" onClick={onOpenCloud} type="button">
             <Settings size={15} /> 학교 설정
           </button>
@@ -457,83 +574,6 @@ export default function AdminView({
             </div>
           </section>
         ) : null}
-
-        <section className="surface-card">
-          <div className="section-heading">
-            <div>
-              <h2>내 계정</h2>
-              <p className="micro-copy">비밀번호를 변경하거나 현재 로그인한 관리자 계정을 탈퇴할 수 있습니다.</p>
-            </div>
-          </div>
-
-          <div className="account-panel">
-            <div className="account-summary-card">
-              <strong>{adminName || "관리자"}</strong>
-              <p>{adminEmail || "이메일 정보 없음"}</p>
-              <p className="micro-copy">{schoolName || "학교 미지정"}</p>
-            </div>
-
-            <div className="account-management-grid">
-              {canChangePassword ? (
-                <form className="form-stack account-form-card" onSubmit={handlePasswordSubmit}>
-                  <div>
-                    <h3 className="account-card-title">비밀번호 변경</h3>
-                    <p className="micro-copy">현재 비밀번호를 다시 확인한 뒤 새 비밀번호로 변경합니다.</p>
-                  </div>
-
-                  <input
-                    autoComplete="current-password"
-                    className="text-input"
-                    onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
-                    placeholder="현재 비밀번호"
-                    type="password"
-                    value={passwordForm.currentPassword}
-                  />
-                  <input
-                    autoComplete="new-password"
-                    className="text-input"
-                    onChange={(event) => updatePasswordField("nextPassword", event.target.value)}
-                    placeholder="새 비밀번호"
-                    type="password"
-                    value={passwordForm.nextPassword}
-                  />
-                  <input
-                    autoComplete="new-password"
-                    className="text-input"
-                    onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
-                    placeholder="새 비밀번호 확인"
-                    type="password"
-                    value={passwordForm.confirmPassword}
-                  />
-
-                  <div className="button-row button-row-end">
-                    <button className="mini-button mini-button-blue" disabled={accountBusy} type="submit">
-                      비밀번호 변경
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <article className="notice-card notice-card-cool account-form-card">
-                  <h3 className="account-card-title">비밀번호 변경 불가</h3>
-                  <p>Google 로그인 전용 계정은 비밀번호 변경 대상이 아닙니다.</p>
-                </article>
-              )}
-
-              <div className="account-danger-card">
-                <div>
-                  <h3 className="account-card-title">계정 탈퇴</h3>
-                  <p className="micro-copy">탈퇴 시 Firebase 인증 계정과 관리자 문서가 함께 삭제됩니다.</p>
-                </div>
-
-                <div className="button-row button-row-end">
-                  <button className="mini-button mini-button-danger" disabled={accountBusy} onClick={onDeleteOwnAccount} type="button">
-                    내 계정 탈퇴
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
 
         <section className="surface-card">
           <div className="section-heading">
