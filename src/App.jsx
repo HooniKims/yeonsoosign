@@ -9,7 +9,16 @@ import SignatureModal from "./components/SignatureModal";
 import SignerView from "./components/SignerView";
 import { deleteOwnAdminAccount } from "./lib/adminManagement";
 import { APP_NAME, DEFAULT_CLOUD_CONFIG } from "./lib/constants";
-import { signInWithEmail, signInWithGoogle, signOutAdmin, signUpWithEmail, subscribeToAuthState } from "./lib/auth";
+import {
+  canUpdateAdminPassword,
+  changeAdminPassword,
+  completeAdminOnboarding,
+  signInWithEmail,
+  signInWithGoogle,
+  signOutAdmin,
+  signUpWithEmail,
+  subscribeToAuthState,
+} from "./lib/auth";
 import { hasFirebaseConfig } from "./lib/firebase";
 import {
   readSchoolConfigById,
@@ -171,6 +180,38 @@ function normalizeSignaturePayload(participant, dataUrl) {
   };
 }
 
+function hasCompleteAdminProfile(profile) {
+  return Boolean(profile?.schoolId && profile?.schoolName);
+}
+
+function buildPendingAuthFlow(profile) {
+  if (!profile) {
+    return {
+      type: "signup",
+      title: "관리자 가입이 필요합니다",
+      description: "로그인은 완료되었지만 관리자 프로필이 없습니다. 학교를 선택해 가입을 완료해 주세요.",
+      noticeTitle: "현재 계정으로 가입을 이어서 진행해 주세요",
+      noticeBody: "다시 Google 팝업을 띄울 필요 없이 학교 선택만 마치면 관리자 계정 생성이 완료됩니다.",
+      submitLabel: "관리자 가입 완료",
+      suggestedSchoolName: "",
+    };
+  }
+
+  if (!hasCompleteAdminProfile(profile)) {
+    return {
+      type: "school",
+      title: "학교 정보 확인이 필요합니다",
+      description: "관리자 프로필의 학교 정보가 비어 있어 학교 선택을 먼저 완료해야 합니다.",
+      noticeTitle: "학교를 다시 선택해 주세요",
+      noticeBody: "학교는 검색 결과에서 선택해야 하며, 저장이 끝나야 관리자 화면으로 이동할 수 있습니다.",
+      submitLabel: "학교 정보 저장",
+      suggestedSchoolName: profile.schoolName || "",
+    };
+  }
+
+  return null;
+}
+
 export default function App() {
   const initialLegacyCloudConfigRef = useRef(getInitialLegacyCloudConfig());
   const initialRouteRef = useRef(getInitialRouteState());
@@ -203,6 +244,14 @@ export default function App() {
 
   const activeAdminSchoolId = adminProfile?.schoolId || null;
   const currentSchoolName = adminSchoolConfig?.schoolName || adminProfile?.schoolName || "";
+  const pendingAuthFlow = useMemo(() => {
+    if (!currentUser || adminProfileLoading) {
+      return null;
+    }
+
+    return buildPendingAuthFlow(adminProfile);
+  }, [adminProfile, adminProfileLoading, currentUser]);
+  const canChangePassword = useMemo(() => canUpdateAdminPassword(currentUser), [currentUser]);
   const currentUserLabel = currentUser?.displayName || currentUser?.email || "관리자";
   const adminCloudConfig = useMemo(
     () => buildCloudConfig(adminSchoolConfig?.gasWebAppUrl),
@@ -329,8 +378,20 @@ export default function App() {
     setAuthBusy(true);
 
     try {
-      const user = await action();
-      setCurrentUser(user);
+      const result = await action();
+      setCurrentUser(result?.user || null);
+      setAdminProfile(result?.profile || null);
+
+      if (result?.needsSignup) {
+        notify("관리자 가입이 필요합니다. 학교를 선택해 가입을 완료해 주세요.", "error");
+        return;
+      }
+
+      if (result?.needsSchoolSelection) {
+        notify("학교 정보가 비어 있어 추가 입력이 필요합니다.", "error");
+        return;
+      }
+
       notify(successMessage);
 
       if (authIntent === "cloud_setup") {
@@ -516,6 +577,31 @@ export default function App() {
   // GAS is not yet configured.
 
   useEffect(() => {
+    if (!authReady || !currentUser || adminProfileLoading || !pendingAuthFlow) {
+      return undefined;
+    }
+
+    if (view === "auth" || view === "signer" || view === "report") {
+      return undefined;
+    }
+
+    setAuthIntent(view === "cloud_setup" ? "cloud_setup" : "admin");
+    transitionTo({ view: "auth" }, { replace: true });
+    return undefined;
+  }, [adminProfileLoading, authReady, currentUser, pendingAuthFlow, view]);
+
+  useEffect(() => {
+    if (view !== "admin" || !currentUser || pendingAuthFlow || adminProfileLoading || adminSchoolLoading) {
+      return;
+    }
+
+    if (!adminCloudConfig.enabled) {
+      transitionTo({ view: "cloud_setup" }, { replace: true });
+    }
+  }, [adminCloudConfig.enabled, adminProfileLoading, adminSchoolLoading, currentUser, pendingAuthFlow, view]);
+
+
+  useEffect(() => {
     if (!authReady) {
       return undefined;
     }
@@ -528,7 +614,7 @@ export default function App() {
       return undefined;
     }
 
-    const canLoadAdminData = !shouldUseRouteConfig && currentUser;
+    const canLoadAdminData = !shouldUseRouteConfig && currentUser && !pendingAuthFlow;
     const canLoadSignerData = shouldUseRouteConfig;
 
     if (!canLoadAdminData && !canLoadSignerData) {
@@ -578,6 +664,7 @@ export default function App() {
     adminSchoolLoading,
     authReady,
     currentUser,
+    pendingAuthFlow,
     routeSchoolLoading,
     shouldUseRouteConfig,
   ]);
@@ -876,10 +963,63 @@ export default function App() {
     }
   }
 
+  async function handleCompleteOnboarding(school) {
+    setAuthBusy(true);
+
+    try {
+      const result = await completeAdminOnboarding({ school });
+      setCurrentUser(result.user);
+      setAdminProfile(result.profile);
+
+      notify(
+        pendingAuthFlow?.type === "signup"
+          ? "관리자 가입이 완료되었습니다."
+          : "학교 정보가 저장되었습니다.",
+      );
+
+      if (authIntent === "cloud_setup") {
+        transitionTo({ view: "cloud_setup" });
+        return;
+      }
+
+      transitionTo({ view: "admin" });
+    } catch (error) {
+      notify(error.message || "관리자 계정 보완에 실패했습니다.", "error");
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function handleChangePassword(payload) {
+    setAuthBusy(true);
+
+    try {
+      await changeAdminPassword(payload);
+      notify("비밀번호가 변경되었습니다.");
+      return true;
+    } catch (error) {
+      notify(error.message || "비밀번호 변경에 실패했습니다.", "error");
+      return false;
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
   function openAdminExperience() {
     if (!currentUser) {
       setAuthIntent("admin");
       transitionTo({ view: "auth" });
+      return;
+    }
+
+    if (pendingAuthFlow) {
+      setAuthIntent("admin");
+      transitionTo({ view: "auth" });
+      return;
+    }
+
+    if (!adminCloudConfig.enabled) {
+      transitionTo({ view: "cloud_setup" });
       return;
     }
 
@@ -888,6 +1028,12 @@ export default function App() {
 
   function openSchoolSettings() {
     if (!currentUser) {
+      setAuthIntent("cloud_setup");
+      transitionTo({ view: "auth" });
+      return;
+    }
+
+    if (pendingAuthFlow) {
       setAuthIntent("cloud_setup");
       transitionTo({ view: "auth" });
       return;
@@ -1042,6 +1188,7 @@ export default function App() {
     try {
       await signOutAdmin();
       setCurrentUser(null);
+      setAdminProfile(null);
       transitionTo({ view: "landing" }, { replace: true });
       notify("로그아웃되었습니다.");
     } catch (error) {
@@ -1072,6 +1219,7 @@ export default function App() {
       }
 
       setCurrentUser(null);
+      setAdminProfile(null);
       transitionTo({ view: "landing" }, { replace: true });
       notify("내 계정이 탈퇴 처리되었습니다.");
     } catch (error) {
@@ -1086,7 +1234,11 @@ export default function App() {
     : "";
   const screenLoading =
     !authReady ||
-    ((view === "admin" || view === "cloud_setup") && currentUser && (adminProfileLoading || adminSchoolLoading)) ||
+    (
+      (view === "admin" || view === "cloud_setup" || (view === "auth" && currentUser)) &&
+      currentUser &&
+      (adminProfileLoading || (view !== "auth" && adminSchoolLoading))
+    ) ||
     (view === "signer" && routeSchoolId && routeSchoolLoading && sessions.length === 0);
 
   if (screenLoading) {
@@ -1116,8 +1268,10 @@ export default function App() {
       {view === "auth" ? (
         <AuthView
           authBusy={authBusy}
+          currentUser={currentUser}
           intent={authIntent}
           onBack={() => goBack({ view: "landing" })}
+          onCompleteOnboarding={handleCompleteOnboarding}
           onEmailLogin={(payload) =>
             runAuthAction(() => signInWithEmail(payload), "관리자 로그인이 완료되었습니다.")
           }
@@ -1133,18 +1287,23 @@ export default function App() {
               "Google 계정으로 관리자 가입이 완료되었습니다.",
             )
           }
+          onPendingSignOut={handleLogout}
+          pendingAuthFlow={pendingAuthFlow}
         />
       ) : null}
 
       {view === "admin" ? (
         <AdminView
+          accountBusy={busy || authBusy}
           adminEmail={currentUser?.email || ""}
           adminName={currentUser?.displayName || ""}
           busy={busy}
+          canChangePassword={canChangePassword}
           cloudEnabled={adminCloudConfig.enabled}
           initialSchoolName={currentSchoolName}
           notify={notify}
           onBack={() => transitionTo({ view: "landing" })}
+          onChangePassword={handleChangePassword}
           onClearDefaultStaffList={handleClearDefaultStaffList}
           onCreateSession={handleCreateSession}
           onDeleteSession={handleDeleteSession}

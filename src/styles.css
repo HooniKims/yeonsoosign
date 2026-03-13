@@ -1746,6 +1746,35 @@ a {
   margin: 4px 0 0;
 }
 
+.account-management-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.account-form-card,
+.account-danger-card {
+  display: grid;
+  gap: 16px;
+  min-height: 100%;
+  padding: 20px;
+  border: 1px solid rgba(142, 160, 203, 0.22);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 255, 0.92));
+  box-shadow: 0 14px 32px rgba(123, 145, 196, 0.12);
+}
+
+.account-danger-card {
+  border-color: rgba(223, 74, 74, 0.18);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 241, 241, 0.96));
+}
+
+.account-card-title {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -1777,6 +1806,10 @@ a {
   .dashboard-header-actions,
   .button-row {
     flex-wrap: wrap;
+  }
+
+  .account-management-grid {
+    grid-template-columns: 1fr;
   }
 
   .report-page {

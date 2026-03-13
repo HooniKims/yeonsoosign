@@ -175,8 +175,7 @@ function SessionCard({
               </span>
               <span className="session-card-divider">|</span>
               <strong className="session-card-meta-item session-card-meta-strong">
-                <PenLine size={14} /> {(session.staffList || []).length}명 중 {(session.signatures || []).length}명
-                서명
+                <PenLine size={14} /> {(session.staffList || []).length}명 중 {(session.signatures || []).length}명 서명
               </strong>
             </p>
           </div>
@@ -207,13 +206,16 @@ function SessionCard({
 }
 
 export default function AdminView({
+  accountBusy,
   adminEmail,
   adminName,
   busy,
+  canChangePassword,
   cloudEnabled,
   initialSchoolName,
   notify,
   onBack,
+  onChangePassword,
   onClearDefaultStaffList,
   onCreateSession,
   onDeleteOwnAccount,
@@ -239,6 +241,11 @@ export default function AdminView({
     useAuth: false,
     authCode: "",
   });
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    nextPassword: "",
+    confirmPassword: "",
+  });
   const baseUploadRef = useRef(null);
   const updateUploadRef = useRef(null);
   const updateTargetIdRef = useRef(null);
@@ -250,10 +257,17 @@ export default function AdminView({
     }));
   }, [initialSchoolName]);
 
-  const sessionSummary = useMemo(() => `${staffList.length}명`, [staffList.length]);
+  const sessionSummary = useMemo(() => `${staffList.length}명 등록`, [staffList.length]);
 
   function updateField(field, value) {
     setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  function updatePasswordField(field, value) {
+    setPasswordForm((current) => ({
       ...current,
       [field]: value,
     }));
@@ -279,6 +293,40 @@ export default function AdminView({
     }
 
     await onReplaceSessionStaffList(sessionId, list);
+  }
+
+  async function handlePasswordSubmit(event) {
+    event.preventDefault();
+
+    if (!passwordForm.currentPassword || !passwordForm.nextPassword || !passwordForm.confirmPassword) {
+      notify("현재 비밀번호와 새 비밀번호를 모두 입력해 주세요.", "error");
+      return;
+    }
+
+    if (passwordForm.nextPassword.length < 6) {
+      notify("새 비밀번호는 6자 이상이어야 합니다.", "error");
+      return;
+    }
+
+    if (passwordForm.nextPassword !== passwordForm.confirmPassword) {
+      notify("새 비밀번호 확인이 일치하지 않습니다.", "error");
+      return;
+    }
+
+    const success = await onChangePassword({
+      currentPassword: passwordForm.currentPassword,
+      nextPassword: passwordForm.nextPassword,
+    });
+
+    if (!success) {
+      return;
+    }
+
+    setPasswordForm({
+      currentPassword: "",
+      nextPassword: "",
+      confirmPassword: "",
+    });
   }
 
   async function handleSubmit(event) {
@@ -414,7 +462,7 @@ export default function AdminView({
           <div className="section-heading">
             <div>
               <h2>내 계정</h2>
-              <p className="micro-copy">현재 로그인한 관리자 계정의 탈퇴 기능입니다.</p>
+              <p className="micro-copy">비밀번호를 변경하거나 현재 로그인한 관리자 계정을 탈퇴할 수 있습니다.</p>
             </div>
           </div>
 
@@ -425,10 +473,64 @@ export default function AdminView({
               <p className="micro-copy">{schoolName || "학교 미지정"}</p>
             </div>
 
-            <div className="button-row button-row-end">
-              <button className="mini-button mini-button-danger" disabled={busy} onClick={onDeleteOwnAccount} type="button">
-                내 계정 탈퇴
-              </button>
+            <div className="account-management-grid">
+              {canChangePassword ? (
+                <form className="form-stack account-form-card" onSubmit={handlePasswordSubmit}>
+                  <div>
+                    <h3 className="account-card-title">비밀번호 변경</h3>
+                    <p className="micro-copy">현재 비밀번호를 다시 확인한 뒤 새 비밀번호로 변경합니다.</p>
+                  </div>
+
+                  <input
+                    autoComplete="current-password"
+                    className="text-input"
+                    onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
+                    placeholder="현재 비밀번호"
+                    type="password"
+                    value={passwordForm.currentPassword}
+                  />
+                  <input
+                    autoComplete="new-password"
+                    className="text-input"
+                    onChange={(event) => updatePasswordField("nextPassword", event.target.value)}
+                    placeholder="새 비밀번호"
+                    type="password"
+                    value={passwordForm.nextPassword}
+                  />
+                  <input
+                    autoComplete="new-password"
+                    className="text-input"
+                    onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
+                    placeholder="새 비밀번호 확인"
+                    type="password"
+                    value={passwordForm.confirmPassword}
+                  />
+
+                  <div className="button-row button-row-end">
+                    <button className="mini-button mini-button-blue" disabled={accountBusy} type="submit">
+                      비밀번호 변경
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <article className="notice-card notice-card-cool account-form-card">
+                  <h3 className="account-card-title">비밀번호 변경 불가</h3>
+                  <p>Google 로그인 전용 계정은 비밀번호 변경 대상이 아닙니다.</p>
+                </article>
+              )}
+
+              <div className="account-danger-card">
+                <div>
+                  <h3 className="account-card-title">계정 탈퇴</h3>
+                  <p className="micro-copy">탈퇴 시 Firebase 인증 계정과 관리자 문서가 함께 삭제됩니다.</p>
+                </div>
+
+                <div className="button-row button-row-end">
+                  <button className="mini-button mini-button-danger" disabled={accountBusy} onClick={onDeleteOwnAccount} type="button">
+                    내 계정 탈퇴
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -516,7 +618,7 @@ export default function AdminView({
           <div className="section-heading">
             <div>
               <h2>등록된 연수 목록</h2>
-              <p className="micro-copy">기존 연수는 새 명단 업로드와 무관하게 그대로 유지됩니다.</p>
+              <p className="micro-copy">기존 연수 목록은 명단 업로드와 무관하게 그대로 유지됩니다.</p>
             </div>
           </div>
 

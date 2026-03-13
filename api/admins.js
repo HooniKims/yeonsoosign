@@ -36,34 +36,45 @@ function readRequestBody(request) {
   return request.body;
 }
 
+function isIgnorableDeleteError(error) {
+  return error?.code === "auth/user-not-found";
+}
+
 async function getRequesterContext(request) {
   const token = readBearerToken(request);
   const { adminAuth, adminDb } = getAdminContext();
   const decodedToken = await adminAuth.verifyIdToken(token);
   const adminSnapshot = await adminDb.collection("admins").doc(decodedToken.uid).get();
 
-  if (!adminSnapshot.exists) {
-    throw createHttpError(404, "관리자 가입 정보가 없습니다.");
-  }
-
   return {
     adminAuth,
     adminDb,
     decodedToken,
+    hasAdminProfile: adminSnapshot.exists,
   };
 }
 
 async function deleteOwnAccount(response, context) {
-  const { adminAuth, adminDb, decodedToken } = context;
+  const { adminAuth, adminDb, decodedToken, hasAdminProfile } = context;
 
-  await Promise.all([
+  const [docResult, userResult] = await Promise.allSettled([
     adminDb.collection("admins").doc(decodedToken.uid).delete(),
     adminAuth.deleteUser(decodedToken.uid),
   ]);
 
+  if (docResult.status === "rejected") {
+    throw docResult.reason;
+  }
+
+  if (userResult.status === "rejected" && !isIgnorableDeleteError(userResult.reason)) {
+    throw userResult.reason;
+  }
+
   response.status(200).json({
     data: {
       deletedUid: decodedToken.uid,
+      deletedAdminProfile: hasAdminProfile,
+      deletedAuthUser: userResult.status === "fulfilled",
     },
   });
 }
@@ -83,7 +94,7 @@ export default async function handler(request, response) {
       throw createHttpError(400, "지원하지 않는 관리자 요청입니다.");
     }
 
-    throw createHttpError(405, "허용되지 않은 요청 방식입니다.");
+    throw createHttpError(405, "허용하지 않는 요청 방식입니다.");
   } catch (error) {
     buildError(response, error.status || 500, error.message || "관리자 요청 처리에 실패했습니다.");
   }

@@ -305,3 +305,30 @@
 - 메모:
   - 정확한 잔상 개체가 앱 토스트인지 브라우저/확장 주입 UI인지는 단정하지 않았고, 원인 범주를 “보고서 외부 오버레이 인쇄 혼입”으로 보고 안전하게 차단
   - 백업 폴더는 Git에 올리지 않고 로컬 롤백 용도로만 유지
+
+## 2026-03-13 추가 반영
+
+### 15. 관리자 인증/계정 관리 흐름 보완
+- 상태: 완료
+- 처리 내용:
+  1. `src/lib/auth.js`를 인증 결과 객체 기반으로 바꾸고, Google 로그인 후 관리자 프로필이 없거나 학교 정보가 누락된 경우 `needsSignup` / `needsSchoolSelection` 상태를 반환하도록 수정
+  2. 현재 로그인 상태를 유지한 채 관리자 가입을 마무리할 수 있도록 `completeAdminOnboarding()` helper를 추가하고, 이메일 계정용 `changeAdminPassword()`를 `reauthenticateWithCredential` + `updatePassword` 방식으로 구현
+  3. `src/App.jsx`에서 인증 성공 후 단순 토스트/이동 대신 후속 상태를 해석하도록 수정하고, 복귀 로그인 시에도 관리자 프로필/학교 정보가 불완전하면 `AuthView` 보완 플로우로 강제 진입하도록 연결
+  4. `src/components/AuthView.jsx`에 학교 검색 재사용형 온보딩 UI를 추가해서 Google 로그인 직후 관리자 가입 또는 학교 정보 보완을 같은 화면에서 이어서 완료할 수 있게 변경
+  5. `src/components/AdminView.jsx`의 내 계정 영역에 비밀번호 변경 폼을 추가하고, Google-only 계정은 비밀번호 변경 불가 안내가 보이도록 정리
+  6. `api/admins.js`의 `deleteSelf`를 idempotent 하게 수정해서 `admins/{uid}` 문서가 이미 없거나 Firebase Auth 사용자가 이미 삭제된 경우에도 거짓 실패 없이 탈퇴 완료로 처리
+  7. `src/lib/auth.test.js`, `api/admins.test.js`를 새 인증/탈퇴 동작 기준으로 갱신
+- 관련 파일:
+  - `src/App.jsx`
+  - `src/components/AuthView.jsx`
+  - `src/components/AdminView.jsx`
+  - `src/lib/auth.js`
+  - `src/lib/auth.test.js`
+  - `api/admins.js`
+  - `api/admins.test.js`
+  - `src/styles.css`
+- 검증:
+  - `npm test` 통과
+  - `npm run build` 통과
+- 메모:
+  - 실제 Firebase/Google 팝업 기반 E2E와 Firestore 실데이터 확인은 현재 로컬 자동화 범위 밖이므로 배포 환경에서 한 번 더 확인 필요
