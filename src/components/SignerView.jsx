@@ -1,4 +1,28 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { DEFAULT_POSITION_ORDER } from "../lib/constants";
+
+function compareKorean(left, right) {
+  return String(left || "").localeCompare(String(right || ""), "ko");
+}
+
+function sortStaffByPositionThenName(staffList) {
+  const positionRankMap = new Map(
+    DEFAULT_POSITION_ORDER.map((item, index) => [item, index])
+  );
+
+  return [...staffList].sort((left, right) => {
+    const leftPos = left.department || "";
+    const rightPos = right.department || "";
+    const leftRank = positionRankMap.get(leftPos) ?? Number.MAX_SAFE_INTEGER;
+    const rightRank = positionRankMap.get(rightPos) ?? Number.MAX_SAFE_INTEGER;
+
+    return (
+      leftRank - rightRank ||
+      compareKorean(leftPos, rightPos) ||
+      compareKorean(left.name, right.name)
+    );
+  });
+}
 
 function normalizeKeyPart(value) {
   return String(value || "")
@@ -123,17 +147,22 @@ function SchoolSigner({ session, sharedEntry, onBack, onRequestSignature }) {
     [session.signatures],
   );
 
+  const sortedStaff = useMemo(
+    () => sortStaffByPositionThenName(session.staffList || []),
+    [session.staffList]
+  );
+
   const filteredStaff = useMemo(() => {
     const keyword = deferredSearch.trim();
 
     if (!keyword) {
-      return session.staffList || [];
+      return sortedStaff;
     }
 
-    return (session.staffList || []).filter((item) => {
+    return sortedStaff.filter((item) => {
       return item.name.includes(keyword) || item.department.includes(keyword);
     });
-  }, [deferredSearch, session.staffList]);
+  }, [deferredSearch, sortedStaff]);
 
   function handleSelect(staff) {
     const signed = signedStaffIds.has(staff.id);
