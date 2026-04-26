@@ -1,28 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { DEFAULT_POSITION_ORDER } from "../lib/constants";
-
-function compareKorean(left, right) {
-  return String(left || "").localeCompare(String(right || ""), "ko");
-}
-
-function sortStaffByPositionThenName(staffList) {
-  const positionRankMap = new Map(
-    DEFAULT_POSITION_ORDER.map((item, index) => [item, index])
-  );
-
-  return [...staffList].sort((left, right) => {
-    const leftPos = left.department || "";
-    const rightPos = right.department || "";
-    const leftRank = positionRankMap.get(leftPos) ?? Number.MAX_SAFE_INTEGER;
-    const rightRank = positionRankMap.get(rightPos) ?? Number.MAX_SAFE_INTEGER;
-
-    return (
-      leftRank - rightRank ||
-      compareKorean(leftPos, rightPos) ||
-      compareKorean(left.name, right.name)
-    );
-  });
-}
+import { sortStaffByPositionThenName } from "../lib/sort";
 
 function normalizeKeyPart(value) {
   return String(value || "")

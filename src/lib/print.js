@@ -1,10 +1,4 @@
-function compareKorean(left, right) {
-  return String(left || "").localeCompare(String(right || ""), "ko");
-}
-
-function makePositionRankMap(positionOrder) {
-  return new Map(positionOrder.map((item, index) => [item, index]));
-}
+import { compareKorean, makePositionRankMap } from "./sort";
 
 function buildRecords(session) {
   if (session.staffList && session.staffList.length > 0) {
