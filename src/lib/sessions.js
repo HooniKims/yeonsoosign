@@ -56,11 +56,18 @@ async function readResponse(response) {
     throw new Error(INVALID_RESPONSE_MESSAGE);
   }
 
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error(INVALID_SERVER_RESPONSE_MESSAGE);
+  }
+
   if (!response.ok) {
     throw new Error(payload.message || INVALID_SERVER_RESPONSE_MESSAGE);
   }
 
   if (payload.status && payload.status !== "success") {
+    if (/SyntaxError:.*(?:Unexpected end of JSON input|JSON)/i.test(payload.message || "")) {
+      throw new Error("학교 Apps Script에서 연수 저장 파일을 읽지 못했습니다. 관리자에게 Google Drive의 TrainingRegister_DB.json 파일과 이전 버전을 확인해 달라고 요청해 주세요.");
+    }
     throw new Error(payload.message || REQUEST_FAILED_MESSAGE);
   }
 
@@ -119,7 +126,10 @@ export async function listSessions(config) {
     method: "GET",
   });
   const payload = await readResponse(response);
-  return sortSessions(payload.data || []);
+  if (!Array.isArray(payload.data)) {
+    throw new Error(INVALID_SESSION_DATA_MESSAGE);
+  }
+  return sortSessions(payload.data);
 }
 
 export async function upsertSession(config, session) {

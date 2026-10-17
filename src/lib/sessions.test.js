@@ -1,5 +1,30 @@
-import { describe, expect, it } from "vitest";
-import { validateScriptUrl } from "./sessions";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { listSessions, validateScriptUrl } from "./sessions";
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("cloud list responses", () => {
+  const config = { enabled: true, scriptUrl: "https://example.com/exec" };
+
+  it("explains the observed Apps Script database parse error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      status: "error", message: "SyntaxError: Unexpected end of JSON input",
+    }))));
+    await expect(listSessions(config)).rejects.toThrow("TrainingRegister_DB.json");
+  });
+
+  it.each(["", "null", '{"status":"success","data":{}}', '{"status":"success"}'])(
+    "rejects an invalid response instead of showing an empty list: %s", async (body) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body)));
+      await expect(listSessions(config)).rejects.toThrow();
+    },
+  );
+
+  it("accepts a valid empty list", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response('{"status":"success","data":[]}')));
+    await expect(listSessions(config)).resolves.toEqual([]);
+  });
+});
 
 describe("validateScriptUrl", () => {
   it("trims and normalizes a valid http url", () => {

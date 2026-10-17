@@ -46,8 +46,12 @@ function doGet(e) {
 }
 
 function doPost(e) {
-  const payload = parsePostPayload_(e);
-  return handleAction(payload.action, payload);
+  try {
+    const payload = parsePostPayload_(e);
+    return handleAction(payload.action, payload);
+  } catch (error) {
+    return json({ status: "error", message: "저장 요청의 JSON 형식이 올바르지 않습니다." });
+  }
 }
 
 function parsePostPayload_(e) {
@@ -67,7 +71,9 @@ function parsePostPayload_(e) {
 }
 
 function handleAction(action, payload) {
+  const lock = LockService.getScriptLock();
   try {
+    lock.waitLock(30000);
     const db = readDatabase();
 
     if (action === "getSessions") {
@@ -135,6 +141,8 @@ function handleAction(action, payload) {
     return json({ status: "error", message: "Unknown action." });
   } catch (error) {
     return json({ status: "error", message: String(error) });
+  } finally {
+    if (lock.hasLock()) lock.releaseLock();
   }
 }
 
@@ -142,7 +150,20 @@ function readDatabase() {
   const files = DriveApp.getFilesByName(DB_FILE_NAME);
   if (files.hasNext()) {
     const file = files.next();
-    return JSON.parse(file.getBlob().getDataAsString());
+    if (files.hasNext()) {
+      throw new Error("같은 이름의 연수 저장 파일이 여러 개 있습니다. 관리자가 TrainingRegister_DB.json 원본 파일을 확인해 주세요.");
+    }
+    const raw = file.getBlob().getDataAsString().trim();
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch (error) {
+      throw new Error("연수 저장 파일(TrainingRegister_DB.json)이 비어 있거나 손상되었습니다. Google Drive에서 이전 버전을 복원해 주세요. 기존 데이터 보호를 위해 저장을 중단했습니다.");
+    }
+    if (!data || !Array.isArray(data.sessions)) {
+      throw new Error("연수 저장 파일의 sessions 형식이 올바르지 않습니다. Google Drive에서 원본 파일을 확인해 주세요.");
+    }
+    return data;
   }
   return { sessions: [] };
 }
